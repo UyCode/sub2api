@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -2097,14 +2098,21 @@ func stripSignatureSensitiveBlocksFromClaudeRequest(req *antigravity.ClaudeReque
 type ForwardGeminiOption func(*forwardGeminiOptions)
 
 type forwardGeminiOptions struct {
-	groupID     int64
-	sessionHash string
+	groupID                int64
+	sessionHash            string
+	imageAssetURLTransform bool
 }
 
 func WithForwardGeminiSession(groupID int64, sessionHash string) ForwardGeminiOption {
 	return func(opts *forwardGeminiOptions) {
 		opts.groupID = groupID
 		opts.sessionHash = sessionHash
+	}
+}
+
+func WithForwardGeminiImageAssetURLTransform(enabled bool) ForwardGeminiOption {
+	return func(opts *forwardGeminiOptions) {
+		opts.imageAssetURLTransform = enabled
 	}
 }
 
@@ -2184,6 +2192,27 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	injectedBody, err := injectIdentityPatchToGeminiRequest(body)
 	if err != nil {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Invalid request body")
+	}
+	if forwardOpts.imageAssetURLTransform {
+		if s.settingService == nil {
+			return nil, s.writeGoogleError(c, http.StatusInternalServerError, "image asset storage is not configured")
+		}
+		if err := s.settingService.EnsureImageAssetStorageReady(ctx); err != nil {
+			status := infraerrors.Code(err)
+			if status <= 0 {
+				status = http.StatusInternalServerError
+			}
+			return nil, s.writeGoogleError(c, status, infraerrors.Message(err))
+		}
+		rewrittenBody, _, err := transformGeminiImageAssetRequest(ctx, s.settingService, injectedBody)
+		if err != nil {
+			status := infraerrors.Code(err)
+			if status <= 0 {
+				status = http.StatusBadRequest
+			}
+			return nil, s.writeGoogleError(c, status, infraerrors.Message(err))
+		}
+		injectedBody = rewrittenBody
 	}
 
 	// 清理 Schema
@@ -2463,7 +2492,7 @@ handleSuccess:
 
 	if stream {
 		// 客户端要求流式，直接透传
-		streamRes, err := s.handleGeminiStreamingResponse(c, resp, startTime)
+		streamRes, err := s.handleGeminiStreamingResponse(c, resp, startTime, geminiImageAssetTransformOptions{Enabled: forwardOpts.imageAssetURLTransform})
 		if err != nil {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=stream_error error=%v", prefix, err)
 			return nil, err
@@ -2473,7 +2502,7 @@ handleSuccess:
 		clientDisconnect = streamRes.clientDisconnect
 	} else {
 		// 客户端要求非流式，收集流式响应后返回
-		streamRes, err := s.handleGeminiStreamToNonStreaming(c, resp, startTime)
+		streamRes, err := s.handleGeminiStreamToNonStreaming(c, resp, startTime, geminiImageAssetTransformOptions{Enabled: forwardOpts.imageAssetURLTransform})
 		if err != nil {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=stream_collect_error error=%v", prefix, err)
 			return nil, err
@@ -3092,7 +3121,15 @@ func handleStreamReadError(err error, clientDisconnected bool, prefix string) (d
 	return false, false
 }
 
-func (s *AntigravityGatewayService) handleGeminiStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time) (*antigravityStreamResult, error) {
+func (s *AntigravityGatewayService) handleGeminiStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, options ...geminiImageAssetTransformOptions) (*antigravityStreamResult, error) {
+	forwardOpts := geminiImageAssetTransformOptions{}
+	if len(options) > 0 {
+		forwardOpts = options[0]
+	}
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
 	c.Status(resp.StatusCode)
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -3252,6 +3289,15 @@ func (s *AntigravityGatewayService) handleGeminiStreamingResponse(c *gin.Context
 						}
 					}
 				}
+				if forwardOpts.Enabled && inner != nil {
+					transformed, changed, err := transformGeminiImageAssetResponse(ctx, s.settingService, inner)
+					if err != nil {
+						return nil, err
+					}
+					if changed {
+						payload = string(transformed)
+					}
+				}
 
 				if firstTokenMs == nil {
 					ms := int(time.Since(startTime).Milliseconds())
@@ -3295,7 +3341,15 @@ func (s *AntigravityGatewayService) handleGeminiStreamingResponse(c *gin.Context
 
 // handleGeminiStreamToNonStreaming 读取上游流式响应，合并为非流式响应返回给客户端
 // Gemini 流式响应是增量的，需要累积所有 chunk 的内容
-func (s *AntigravityGatewayService) handleGeminiStreamToNonStreaming(c *gin.Context, resp *http.Response, startTime time.Time) (*antigravityStreamResult, error) {
+func (s *AntigravityGatewayService) handleGeminiStreamToNonStreaming(c *gin.Context, resp *http.Response, startTime time.Time, options ...geminiImageAssetTransformOptions) (*antigravityStreamResult, error) {
+	forwardOpts := geminiImageAssetTransformOptions{}
+	if len(options) > 0 {
+		forwardOpts = options[0]
+	}
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
 	if s.settingService.cfg != nil && s.settingService.cfg.Gateway.MaxLineSize > 0 {
@@ -3476,6 +3530,13 @@ returnResponse:
 	respBody, err := json.Marshal(finalResponse)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal response: %w", err)
+	}
+	if forwardOpts.Enabled {
+		transformed, _, err := transformGeminiImageAssetResponse(ctx, s.settingService, respBody)
+		if err != nil {
+			return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to upload Gemini image response assets")
+		}
+		respBody = transformed
 	}
 	c.Data(http.StatusOK, "application/json", respBody)
 

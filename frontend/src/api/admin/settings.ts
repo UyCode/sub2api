@@ -16,6 +16,26 @@ export interface DefaultSubscriptionSetting {
   validity_days: number;
 }
 
+export interface ImageAssetStorageConfig {
+  enabled: boolean;
+  endpoint: string;
+  region: string;
+  bucket: string;
+  access_key_id: string;
+  secret_access_key?: string;
+  secret_access_key_configured?: boolean;
+  prefix: string;
+  public_base_url: string;
+  force_path_style: boolean;
+  presigned_url_ttl_seconds: number;
+}
+
+export interface ImageAssetStorageTestResult {
+  ok: boolean;
+  message: string;
+  url?: string;
+}
+
 // ── 平台限额类型 ──────────────────────────────────────────────────
 export type PlatformType = "anthropic" | "openai" | "gemini" | "antigravity"
 export type QuotaWindowType = "daily" | "weekly" | "monthly"
@@ -868,6 +888,33 @@ export async function updateSettings(
   return data;
 }
 
+export async function getImageAssetStorageConfig(): Promise<ImageAssetStorageConfig> {
+  const { data } = await apiClient.get<ImageAssetStorageConfig>(
+    "/admin/settings/image-assets",
+  );
+  return data;
+}
+
+export async function updateImageAssetStorageConfig(
+  config: ImageAssetStorageConfig,
+): Promise<ImageAssetStorageConfig> {
+  const { data } = await apiClient.put<ImageAssetStorageConfig>(
+    "/admin/settings/image-assets",
+    config,
+  );
+  return data;
+}
+
+export async function testImageAssetStorageConfig(
+  config: ImageAssetStorageConfig,
+): Promise<ImageAssetStorageTestResult> {
+  const { data } = await apiClient.post<ImageAssetStorageTestResult>(
+    "/admin/settings/image-assets/test",
+    config,
+  );
+  return data;
+}
+
 /**
  * Test SMTP connection request
  */
@@ -1348,6 +1395,9 @@ export const settingsAPI = {
   updateRectifierSettings,
   getBetaPolicySettings,
   updateBetaPolicySettings,
+  getImageAssetStorageConfig,
+  updateImageAssetStorageConfig,
+  testImageAssetStorageConfig,
   getWebSearchEmulationConfig,
   updateWebSearchEmulationConfig,
   testWebSearchEmulation,

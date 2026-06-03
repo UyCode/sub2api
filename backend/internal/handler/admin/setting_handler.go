@@ -3395,6 +3395,49 @@ func (h *SettingHandler) ResetWebSearchUsage(c *gin.Context) {
 	response.Success(c, nil)
 }
 
+// GetImageAssetStorageConfig 获取图片资产存储配置
+// GET /api/v1/admin/settings/image-assets
+func (h *SettingHandler) GetImageAssetStorageConfig(c *gin.Context) {
+	cfg, err := h.settingService.GetImageAssetStorageConfig(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, cfg)
+}
+
+// UpdateImageAssetStorageConfig 更新图片资产存储配置
+// PUT /api/v1/admin/settings/image-assets
+func (h *SettingHandler) UpdateImageAssetStorageConfig(c *gin.Context) {
+	var cfg service.ImageAssetStorageConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	updated, err := h.settingService.SaveImageAssetStorageConfig(c.Request.Context(), cfg)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, updated)
+}
+
+// TestImageAssetStorageConfig 测试图片资产存储上传
+// POST /api/v1/admin/settings/image-assets/test
+func (h *SettingHandler) TestImageAssetStorageConfig(c *gin.Context) {
+	var cfg service.ImageAssetStorageConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	url, err := h.settingService.TestImageAssetStorageConfig(c.Request.Context(), cfg)
+	if err != nil {
+		response.Success(c, gin.H{"ok": false, "message": err.Error()})
+		return
+	}
+	response.Success(c, gin.H{"ok": true, "message": "upload successful", "url": url})
+}
+
 // TestWebSearchEmulation 测试 Web Search 搜索
 // POST /api/v1/admin/settings/web-search-emulation/test
 func (h *SettingHandler) TestWebSearchEmulation(c *gin.Context) {

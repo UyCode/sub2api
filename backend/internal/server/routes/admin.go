@@ -452,6 +452,10 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		adminSettings.PUT("/web-search-emulation", h.Admin.Setting.UpdateWebSearchEmulationConfig)
 		adminSettings.POST("/web-search-emulation/test", h.Admin.Setting.TestWebSearchEmulation)
 		adminSettings.POST("/web-search-emulation/reset-usage", h.Admin.Setting.ResetWebSearchUsage)
+		// 图片资产 URL 封装存储配置
+		adminSettings.GET("/image-assets", h.Admin.Setting.GetImageAssetStorageConfig)
+		adminSettings.PUT("/image-assets", h.Admin.Setting.UpdateImageAssetStorageConfig)
+		adminSettings.POST("/image-assets/test", h.Admin.Setting.TestImageAssetStorageConfig)
 	}
 }
 

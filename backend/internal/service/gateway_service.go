@@ -9200,6 +9200,17 @@ func (s *GatewayService) ResolveChannelMappingAndRestrict(ctx context.Context, g
 	return s.channelService.ResolveChannelMappingAndRestrict(ctx, groupID, model)
 }
 
+func (s *GatewayService) IsImageAssetURLTransformEnabled(ctx context.Context, groupID *int64, platform string) bool {
+	if s == nil || s.channelService == nil || groupID == nil {
+		return false
+	}
+	ch, err := s.channelService.GetChannelForGroup(ctx, *groupID)
+	if err != nil {
+		return false
+	}
+	return ch.IsImageAssetURLTransformEnabled(platform)
+}
+
 // checkChannelPricingRestriction 根据渠道计费基准检查模型是否受定价列表限制。
 // 供调度阶段预检查（requested / channel_mapped）。
 // upstream 需逐账号检查，此处返回 false。

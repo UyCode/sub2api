@@ -3963,6 +3963,179 @@
               </div>
             </div>
           </div>
+          <!-- Image Asset Storage -->
+          <div class="card">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ localText("图片资产存储", "Image Asset Storage") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{
+                  localText(
+                    "用于将 OpenAI 图片请求和响应中的 base64 图片转存为 S3/R2/OSS URL。",
+                    "Stores OpenAI image request and response base64 assets as S3/R2/OSS URLs.",
+                  )
+                }}
+              </p>
+            </div>
+            <div class="space-y-5 p-6">
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ localText("启用存储配置", "Enable Storage Config") }}
+                  </label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{
+                      localText(
+                        "渠道开关打开后才会对图片 API 生效。",
+                        "Applies to image APIs only when enabled on the channel.",
+                      )
+                    }}
+                  </p>
+                </div>
+                <Toggle v-model="imageAssetStorageConfig.enabled" />
+              </div>
+
+              <div class="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Endpoint
+                  </label>
+                  <input
+                    v-model="imageAssetStorageConfig.endpoint"
+                    type="url"
+                    class="input"
+                    placeholder="https://<account>.r2.cloudflarestorage.com"
+                  />
+                </div>
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Region
+                  </label>
+                  <input
+                    v-model="imageAssetStorageConfig.region"
+                    type="text"
+                    class="input"
+                    placeholder="auto"
+                  />
+                </div>
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Bucket
+                  </label>
+                  <input
+                    v-model="imageAssetStorageConfig.bucket"
+                    type="text"
+                    class="input"
+                  />
+                </div>
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Access Key ID
+                  </label>
+                  <input
+                    v-model="imageAssetStorageConfig.access_key_id"
+                    type="text"
+                    class="input"
+                  />
+                </div>
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Secret Access Key
+                  </label>
+                  <input
+                    v-model="imageAssetStorageConfig.secret_access_key"
+                    type="password"
+                    class="input"
+                    :placeholder="
+                      imageAssetStorageConfig.secret_access_key_configured
+                        ? localText('已配置，留空则保持不变', 'Configured; leave blank to keep it')
+                        : ''
+                    "
+                    autocomplete="new-password"
+                  />
+                </div>
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Prefix
+                  </label>
+                  <input
+                    v-model="imageAssetStorageConfig.prefix"
+                    type="text"
+                    class="input"
+                    placeholder="image-assets"
+                  />
+                </div>
+                <div class="md:col-span-2">
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ localText("公开访问 URL", "Public Base URL") }}
+                  </label>
+                  <input
+                    v-model="imageAssetStorageConfig.public_base_url"
+                    type="url"
+                    class="input"
+                    placeholder="https://cdn.example.com"
+                  />
+                </div>
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ localText("预签名 URL TTL（秒）", "Presigned URL TTL Seconds") }}
+                  </label>
+                  <input
+                    v-model.number="imageAssetStorageConfig.presigned_url_ttl_seconds"
+                    type="number"
+                    min="0"
+                    class="input"
+                  />
+                </div>
+                <div class="flex items-center justify-between rounded border border-gray-200 px-3 py-2 dark:border-dark-600">
+                  <div>
+                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Force Path Style
+                    </label>
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ localText("S3 兼容服务常用。", "Common for S3-compatible storage.") }}
+                    </p>
+                  </div>
+                  <Toggle v-model="imageAssetStorageConfig.force_path_style" />
+                </div>
+              </div>
+
+              <div class="flex items-center gap-3">
+                <button
+                  type="button"
+                  class="btn btn-primary btn-sm"
+                  :disabled="saving || loadFailed"
+                  @click="saveImageAssetStorageConfig(true)"
+                >
+                  {{ localText("保存配置", "Save Config") }}
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-sm"
+                  :disabled="imageAssetTesting"
+                  @click="testImageAssetStorage"
+                >
+                  {{
+                    imageAssetTesting
+                      ? localText("测试中...", "Testing...")
+                      : localText("测试上传", "Test Upload")
+                  }}
+                </button>
+                <a
+                  v-if="imageAssetTestResult?.ok && imageAssetTestResult.url"
+                  :href="imageAssetTestResult.url"
+                  target="_blank"
+                  class="text-sm text-primary-600 hover:underline dark:text-primary-400"
+                >
+                  {{ localText("打开测试文件", "Open Test File") }}
+                </a>
+              </div>
+            </div>
+          </div>
+
           <!-- Web Search Emulation -->
           <div class="card">
             <div
@@ -6689,6 +6862,8 @@ import type {
   WebSearchEmulationConfig,
   WebSearchProviderConfig,
   WebSearchTestResult,
+  ImageAssetStorageConfig,
+  ImageAssetStorageTestResult,
 } from "@/api/admin/settings";
 import type {
   AdminGroup,
@@ -7261,6 +7436,22 @@ const wsTestLoading = ref(false);
 const wsTestResult = ref<WebSearchTestResult | null>(null);
 const wsTestDialogOpen = ref(false);
 
+const imageAssetStorageConfig = reactive<ImageAssetStorageConfig>({
+  enabled: false,
+  endpoint: "",
+  region: "auto",
+  bucket: "",
+  access_key_id: "",
+  secret_access_key: "",
+  secret_access_key_configured: false,
+  prefix: "image-assets",
+  public_base_url: "",
+  force_path_style: false,
+  presigned_url_ttl_seconds: 3600,
+});
+const imageAssetTesting = ref(false);
+const imageAssetTestResult = ref<ImageAssetStorageTestResult | null>(null);
+
 function openTestDialog() {
   wsTestResult.value = null;
   wsTestDialogOpen.value = true;
@@ -7417,6 +7608,86 @@ async function saveWebSearchConfig(): Promise<boolean> {
   } catch (err: unknown) {
     appStore.showError(extractApiErrorMessage(err, t("common.error")));
     return false;
+  }
+}
+
+async function loadImageAssetStorageConfig() {
+  try {
+    const cfg = await adminAPI.settings.getImageAssetStorageConfig();
+    Object.assign(imageAssetStorageConfig, {
+      enabled: cfg.enabled || false,
+      endpoint: cfg.endpoint || "",
+      region: cfg.region || "auto",
+      bucket: cfg.bucket || "",
+      access_key_id: cfg.access_key_id || "",
+      secret_access_key: "",
+      secret_access_key_configured: cfg.secret_access_key_configured || false,
+      prefix: cfg.prefix || "image-assets",
+      public_base_url: cfg.public_base_url || "",
+      force_path_style: cfg.force_path_style || false,
+      presigned_url_ttl_seconds: cfg.presigned_url_ttl_seconds || 3600,
+    });
+  } catch (err: unknown) {
+    const status = (err as { status?: number })?.status;
+    if (status !== 404 && status !== undefined) {
+      appStore.showError(extractApiErrorMessage(err, t("common.error")));
+    }
+  }
+}
+
+function imageAssetStoragePayload(): ImageAssetStorageConfig {
+  return {
+    ...imageAssetStorageConfig,
+    endpoint: imageAssetStorageConfig.endpoint.trim(),
+    region: imageAssetStorageConfig.region.trim() || "auto",
+    bucket: imageAssetStorageConfig.bucket.trim(),
+    access_key_id: imageAssetStorageConfig.access_key_id.trim(),
+    secret_access_key: imageAssetStorageConfig.secret_access_key?.trim() || "",
+    prefix: imageAssetStorageConfig.prefix.trim(),
+    public_base_url: imageAssetStorageConfig.public_base_url.trim(),
+    presigned_url_ttl_seconds: Number(imageAssetStorageConfig.presigned_url_ttl_seconds) || 0,
+  };
+}
+
+async function saveImageAssetStorageConfig(showToast = false): Promise<boolean> {
+  try {
+    const updated = await adminAPI.settings.updateImageAssetStorageConfig(
+      imageAssetStoragePayload(),
+    );
+    Object.assign(imageAssetStorageConfig, {
+      ...updated,
+      secret_access_key: "",
+      region: updated.region || "auto",
+      prefix: updated.prefix || "image-assets",
+      presigned_url_ttl_seconds: updated.presigned_url_ttl_seconds || 3600,
+    });
+    if (showToast) {
+      appStore.showSuccess(localText("图片资产存储配置已保存", "Image asset storage config saved."));
+    }
+    return true;
+  } catch (err: unknown) {
+    appStore.showError(extractApiErrorMessage(err, t("common.error")));
+    return false;
+  }
+}
+
+async function testImageAssetStorage() {
+  imageAssetTesting.value = true;
+  imageAssetTestResult.value = null;
+  try {
+    const result = await adminAPI.settings.testImageAssetStorageConfig(
+      imageAssetStoragePayload(),
+    );
+    imageAssetTestResult.value = result;
+    if (result.ok) {
+      appStore.showSuccess(localText("图片资产存储测试成功", "Image asset storage test passed."));
+    } else {
+      appStore.showError(result.message || t("common.error"));
+    }
+  } catch (err: unknown) {
+    appStore.showError(extractApiErrorMessage(err, t("common.error")));
+  } finally {
+    imageAssetTesting.value = false;
   }
 }
 
@@ -8428,12 +8699,13 @@ async function saveSettings() {
         }));
       openaiFastPolicyLoaded.value = true;
     }
-    // Save web search emulation config separately (errors handled internally)
+    // Save feature-specific configs separately (errors handled internally)
     const wsOk = await saveWebSearchConfig();
+    const imageAssetOk = await saveImageAssetStorageConfig();
     // Refresh cached settings so sidebar/header update immediately
     await appStore.fetchPublicSettings(true);
     await adminSettingsStore.fetch(true);
-    if (wsOk) {
+    if (wsOk && imageAssetOk) {
       appStore.showSuccess(t("admin.settings.settingsSaved"));
     }
   } catch (error: unknown) {
@@ -9250,6 +9522,7 @@ onMounted(() => {
   loadStreamTimeoutSettings();
   loadRectifierSettings();
   loadBetaPolicySettings();
+  loadImageAssetStorageConfig();
   loadProviders();
 });
 

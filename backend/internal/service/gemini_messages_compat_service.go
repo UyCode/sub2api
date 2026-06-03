@@ -20,6 +20,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/googleapi"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -38,6 +39,14 @@ const (
 	geminiRetryMaxDelay  = 16 * time.Second
 )
 
+type ForwardNativeOption func(*geminiImageAssetTransformOptions)
+
+func WithForwardNativeImageAssetURLTransform(enabled bool) ForwardNativeOption {
+	return func(opts *geminiImageAssetTransformOptions) {
+		opts.Enabled = enabled
+	}
+}
+
 // Gemini tool calling now requires `thoughtSignature` in parts that include `functionCall`.
 // Many clients don't send it; we inject a known dummy signature to satisfy the validator.
 // Ref: https://ai.google.dev/gemini-api/docs/thought-signatures
@@ -52,6 +61,7 @@ type GeminiMessagesCompatService struct {
 	rateLimitService          *RateLimitService
 	httpUpstream              HTTPUpstream
 	antigravityGatewayService *AntigravityGatewayService
+	settingService            *SettingService
 	cfg                       *config.Config
 	responseHeaderFilter      *responseheaders.CompiledHeaderFilter
 }
@@ -77,6 +87,7 @@ func NewGeminiMessagesCompatService(
 	rateLimitService *RateLimitService,
 	httpUpstream HTTPUpstream,
 	antigravityGatewayService *AntigravityGatewayService,
+	settingService *SettingService,
 	cfg *config.Config,
 ) *GeminiMessagesCompatService {
 	return &GeminiMessagesCompatService{
@@ -88,6 +99,7 @@ func NewGeminiMessagesCompatService(
 		rateLimitService:          rateLimitService,
 		httpUpstream:              httpUpstream,
 		antigravityGatewayService: antigravityGatewayService,
+		settingService:            settingService,
 		cfg:                       cfg,
 		responseHeaderFilter:      compileResponseHeaderFilter(cfg),
 	}
@@ -1106,8 +1118,14 @@ func isGeminiSignatureRelatedError(respBody []byte) bool {
 	return strings.Contains(msg, "thought_signature") || strings.Contains(msg, "signature")
 }
 
-func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (*ForwardResult, error) {
+func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte, options ...ForwardNativeOption) (*ForwardResult, error) {
 	startTime := time.Now()
+	forwardOpts := geminiImageAssetTransformOptions{}
+	for _, apply := range options {
+		if apply != nil {
+			apply(&forwardOpts)
+		}
+	}
 
 	if strings.TrimSpace(originalModel) == "" {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Missing model in URL")
@@ -1134,6 +1152,31 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	// Some Gemini upstreams validate tool call parts strictly; ensure any `functionCall` part includes a
 	// `thoughtSignature` to avoid frequent INVALID_ARGUMENT 400s.
 	body = ensureGeminiFunctionCallThoughtSignatures(body)
+
+	imageInputSize := s.extractImageInputSize(body)
+	imageSize := normalizeOpenAIImageSizeTier(imageInputSize)
+
+	if forwardOpts.Enabled && action != "countTokens" {
+		if s.settingService == nil {
+			return nil, s.writeGoogleError(c, http.StatusInternalServerError, "image asset storage is not configured")
+		}
+		if err := s.settingService.EnsureImageAssetStorageReady(ctx); err != nil {
+			status := infraerrors.Code(err)
+			if status <= 0 {
+				status = http.StatusInternalServerError
+			}
+			return nil, s.writeGoogleError(c, status, infraerrors.Message(err))
+		}
+		rewrittenBody, _, err := transformGeminiImageAssetRequest(ctx, s.settingService, body)
+		if err != nil {
+			status := infraerrors.Code(err)
+			if status <= 0 {
+				status = http.StatusBadRequest
+			}
+			return nil, s.writeGoogleError(c, status, infraerrors.Message(err))
+		}
+		body = rewrittenBody
+	}
 
 	mappedModel := originalModel
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
@@ -1572,7 +1615,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	var firstTokenMs *int
 
 	if stream {
-		streamRes, err := s.handleNativeStreamingResponse(c, resp, startTime, isOAuth)
+		streamRes, err := s.handleNativeStreamingResponse(c, resp, startTime, isOAuth, forwardOpts)
 		if err != nil {
 			return nil, err
 		}
@@ -1585,10 +1628,17 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to read upstream stream")
 			}
 			b, _ := json.Marshal(collected)
+			if forwardOpts.Enabled {
+				transformed, _, err := transformGeminiImageAssetResponse(ctx, s.settingService, b)
+				if err != nil {
+					return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to upload Gemini image response assets")
+				}
+				b = transformed
+			}
 			c.Data(http.StatusOK, "application/json", b)
 			usage = usageObj
 		} else {
-			usageResp, err := s.handleNativeNonStreamingResponse(c, resp, isOAuth)
+			usageResp, err := s.handleNativeNonStreamingResponse(c, resp, isOAuth, forwardOpts)
 			if err != nil {
 				return nil, err
 			}
@@ -1602,8 +1652,6 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 
 	// 图片生成计费
 	imageCount := 0
-	imageInputSize := s.extractImageInputSize(body)
-	imageSize := normalizeOpenAIImageSizeTier(imageInputSize)
 	if isImageGenerationModel(originalModel) {
 		imageCount = 1
 	}
@@ -2492,7 +2540,11 @@ type UpstreamHTTPResult struct {
 	Body       []byte
 }
 
-func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Context, resp *http.Response, isOAuth bool) (*ClaudeUsage, error) {
+func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Context, resp *http.Response, isOAuth bool, options ...geminiImageAssetTransformOptions) (*ClaudeUsage, error) {
+	forwardOpts := geminiImageAssetTransformOptions{}
+	if len(options) > 0 {
+		forwardOpts = options[0]
+	}
 	if s.cfg != nil && s.cfg.Gateway.GeminiDebugResponseHeaders {
 		logger.LegacyPrintf("service.gemini_messages_compat", "[GeminiAPI] ========== Response Headers ==========")
 		for key, values := range resp.Header {
@@ -2514,6 +2566,17 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 			respBody = unwrappedBody
 		}
 	}
+	if forwardOpts.Enabled {
+		ctx := context.Background()
+		if c != nil && c.Request != nil {
+			ctx = c.Request.Context()
+		}
+		transformed, _, err := transformGeminiImageAssetResponse(ctx, s.settingService, respBody)
+		if err != nil {
+			return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to upload Gemini image response assets")
+		}
+		respBody = transformed
+	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
@@ -2529,7 +2592,15 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 	return &ClaudeUsage{}, nil
 }
 
-func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, isOAuth bool) (*geminiNativeStreamResult, error) {
+func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, isOAuth bool, options ...geminiImageAssetTransformOptions) (*geminiNativeStreamResult, error) {
+	forwardOpts := geminiImageAssetTransformOptions{}
+	if len(options) > 0 {
+		forwardOpts = options[0]
+	}
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
 	if s.cfg != nil && s.cfg.Gateway.GeminiDebugResponseHeaders {
 		logger.LegacyPrintf("service.gemini_messages_compat", "[GeminiAPI] ========== Streaming Response Headers ==========")
 		for key, values := range resp.Header {
@@ -2592,13 +2663,22 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 					if u := extractGeminiUsage(rawBytes); u != nil {
 						usage = u
 					}
+					if forwardOpts.Enabled {
+						transformed, changed, err := transformGeminiImageAssetResponse(ctx, s.settingService, rawBytes)
+						if err != nil {
+							return nil, err
+						}
+						if changed {
+							rawToWrite = string(transformed)
+						}
+					}
 
 					if firstTokenMs == nil {
 						ms := int(time.Since(startTime).Milliseconds())
 						firstTokenMs = &ms
 					}
 
-					if isOAuth {
+					if isOAuth || forwardOpts.Enabled {
 						// SSE format requires double newline (\n\n) to separate events
 						_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", rawToWrite)
 					} else {

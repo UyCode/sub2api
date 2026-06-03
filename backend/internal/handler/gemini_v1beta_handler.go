@@ -478,6 +478,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 		}
 		sessionGroupID := derefGroupID(apiKey.GroupID)
+		imageAssetURLTransformEnabled := h.gatewayService.IsImageAssetURLTransformEnabled(c.Request.Context(), apiKey.GroupID, service.PlatformGemini)
 		if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 			result, err = h.antigravityGatewayService.ForwardGemini(
 				requestCtx,
@@ -489,9 +490,19 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				body,
 				hasBoundSession,
 				service.WithForwardGeminiSession(sessionGroupID, sessionKey),
+				service.WithForwardGeminiImageAssetURLTransform(imageAssetURLTransformEnabled),
 			)
 		} else {
-			result, err = h.geminiCompatService.ForwardNative(requestCtx, c, account, modelName, action, stream, body)
+			result, err = h.geminiCompatService.ForwardNative(
+				requestCtx,
+				c,
+				account,
+				modelName,
+				action,
+				stream,
+				body,
+				service.WithForwardNativeImageAssetURLTransform(imageAssetURLTransformEnabled),
+			)
 		}
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()

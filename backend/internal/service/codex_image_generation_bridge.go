@@ -3,6 +3,7 @@ package service
 import "strings"
 
 const featureKeyCodexImageGenerationBridge = "codex_image_generation_bridge"
+const featureKeyImageAssetURLTransform = "image_asset_url_transform"
 
 func boolOverridePtr(v bool) *bool {
 	return &v
@@ -48,6 +49,14 @@ func (c *Channel) CodexImageGenerationBridgeOverride(platform string) *bool {
 		return nil
 	}
 	return platformBoolOverride(c.FeaturesConfig, featureKeyCodexImageGenerationBridge, platform)
+}
+
+func (c *Channel) IsImageAssetURLTransformEnabled(platform string) bool {
+	if c == nil {
+		return false
+	}
+	override := platformBoolOverride(c.FeaturesConfig, featureKeyImageAssetURLTransform, platform)
+	return override != nil && *override
 }
 
 // CodexImageGenerationBridgeOverride returns the account-level override for Codex
