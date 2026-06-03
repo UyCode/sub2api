@@ -3,12 +3,25 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type geminiModelsResponseForTest struct {
+	Models []geminiModelItemForTest `json:"models"`
+}
+
+type geminiModelItemForTest struct {
+	Name                       string   `json:"name"`
+	SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
+}
 
 // TestGeminiV1BetaHandler_PlatformRoutingInvariant 文档化并验证 Handler 层的平台路由逻辑不变量
 // 该测试确保 gemini 和 antigravity 平台的路由逻辑符合预期
@@ -143,6 +156,90 @@ func TestGeminiV1BetaHandler_GetModelAntigravityFallback(t *testing.T) {
 	}
 }
 
+func TestGeminiV1BetaListModels_UsesCustomModelsList(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	h := &GatewayHandler{}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1beta/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		GroupID: ptrInt64ForGeminiTest(6),
+		Group: &service.Group{
+			ID:       6,
+			Platform: service.PlatformGemini,
+			ModelsListConfig: service.GroupModelsListConfig{
+				Enabled: true,
+				Models:  []string{"gemini-3.1-flash-image", "models/gemini-3.1-flash-image-preview"},
+			},
+		},
+	})
+
+	h.GeminiV1BetaListModels(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got geminiModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Equal(t, []string{
+		"models/gemini-3.1-flash-image",
+		"models/gemini-3.1-flash-image-preview",
+	}, geminiModelNamesForTest(got.Models))
+	require.Equal(t, []string{"generateContent", "streamGenerateContent"}, got.Models[0].SupportedGenerationMethods)
+}
+
+func TestGeminiV1BetaGetModel_UsesCustomModelsList(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	h := &GatewayHandler{}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1beta/models/gemini-3.1-flash-image-preview", nil)
+	c.Params = gin.Params{{Key: "model", Value: "gemini-3.1-flash-image-preview"}}
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		GroupID: ptrInt64ForGeminiTest(6),
+		Group: &service.Group{
+			ID:       6,
+			Platform: service.PlatformGemini,
+			ModelsListConfig: service.GroupModelsListConfig{
+				Enabled: true,
+				Models:  []string{"models/gemini-3.1-flash-image-preview"},
+			},
+		},
+	})
+
+	h.GeminiV1BetaGetModel(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got geminiModelItemForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Equal(t, "models/gemini-3.1-flash-image-preview", got.Name)
+}
+
+func TestGeminiV1BetaGetModel_CustomModelsListRejectsUnlistedModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	h := &GatewayHandler{}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1beta/models/gemini-3.1-pro-preview", nil)
+	c.Params = gin.Params{{Key: "model", Value: "gemini-3.1-pro-preview"}}
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		GroupID: ptrInt64ForGeminiTest(6),
+		Group: &service.Group{
+			ID:       6,
+			Platform: service.PlatformGemini,
+			ModelsListConfig: service.GroupModelsListConfig{
+				Enabled: true,
+				Models:  []string{"gemini-3.1-flash-image-preview"},
+			},
+		},
+	})
+
+	h.GeminiV1BetaGetModel(c)
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+}
+
 func TestShouldFallbackGeminiModel_KnownFallbackOn404(t *testing.T) {
 	t.Parallel()
 
@@ -166,4 +263,16 @@ func TestShouldFallbackGeminiModel_DelegatesScopeFallback(t *testing.T) {
 		Body:       []byte("insufficient authentication scopes"),
 	}
 	require.True(t, shouldFallbackGeminiModel("gemini-future-model", res))
+}
+
+func ptrInt64ForGeminiTest(v int64) *int64 {
+	return &v
+}
+
+func geminiModelNamesForTest(models []geminiModelItemForTest) []string {
+	names := make([]string, 0, len(models))
+	for _, model := range models {
+		names = append(names, model.Name)
+	}
+	return names
 }

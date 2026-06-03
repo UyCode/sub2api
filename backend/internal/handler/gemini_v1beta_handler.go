@@ -51,6 +51,10 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 		c.JSON(http.StatusOK, antigravity.FallbackGeminiModelsList())
 		return
 	}
+	if apiKey.Group != nil && apiKey.Group.CustomModelsListEnabled() {
+		writeCustomGeminiModelsList(c, apiKey.Group.ModelsListConfig.Models)
+		return
+	}
 
 	account, err := h.geminiCompatService.SelectAccountForAIStudioEndpoints(c.Request.Context(), apiKey.GroupID)
 	if err != nil {
@@ -102,6 +106,14 @@ func (h *GatewayHandler) GeminiV1BetaGetModel(c *gin.Context) {
 	// 强制 antigravity 模式：返回 antigravity 模型信息
 	if forcePlatform == service.PlatformAntigravity {
 		c.JSON(http.StatusOK, antigravity.FallbackGeminiModel(modelName))
+		return
+	}
+	if apiKey.Group != nil && apiKey.Group.CustomModelsListEnabled() {
+		if !customGeminiModelsListAllowsModel(apiKey.Group.ModelsListConfig.Models, modelName) {
+			googleError(c, http.StatusNotFound, "Model not found")
+			return
+		}
+		c.JSON(http.StatusOK, gemini.FallbackModel(modelName))
 		return
 	}
 
@@ -700,6 +712,44 @@ func writeUpstreamResponse(c *gin.Context, res *service.UpstreamHTTPResult) {
 		contentType = "application/json"
 	}
 	c.Data(res.StatusCode, contentType, res.Body)
+}
+
+func writeCustomGeminiModelsList(c *gin.Context, modelIDs []string) {
+	models := make([]gemini.Model, 0, len(modelIDs))
+	seen := make(map[string]struct{}, len(modelIDs))
+	for _, modelID := range modelIDs {
+		name := normalizeGeminiModelName(modelID)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		models = append(models, gemini.FallbackModel(name))
+	}
+	c.JSON(http.StatusOK, gemini.ModelsListResponse{Models: models})
+}
+
+func customGeminiModelsListAllowsModel(modelIDs []string, modelName string) bool {
+	needle := normalizeGeminiModelName(modelName)
+	if needle == "" {
+		return false
+	}
+	for _, modelID := range modelIDs {
+		if normalizeGeminiModelName(modelID) == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeGeminiModelName(model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return ""
+	}
+	return strings.TrimPrefix(model, "models/")
 }
 
 func shouldFallbackGeminiModels(res *service.UpstreamHTTPResult) bool {
