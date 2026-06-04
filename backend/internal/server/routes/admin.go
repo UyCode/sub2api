@@ -86,6 +86,9 @@ func RegisterAdminRoutes(
 		// 定时测试计划
 		registerScheduledTestRoutes(admin, h)
 
+		// 并发测试
+		registerConcurrencyTestRoutes(admin, h)
+
 		// 渠道管理
 		registerChannelRoutes(admin, h)
 
@@ -572,6 +575,20 @@ func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	}
 	// Nested under accounts
 	admin.GET("/accounts/:id/scheduled-test-plans", h.Admin.ScheduledTest.ListByAccount)
+}
+
+func registerConcurrencyTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	tests := admin.Group("/concurrency-tests")
+	{
+		tests.GET("", h.Admin.ConcurrencyTest.List)
+		tests.POST("", h.Admin.ConcurrencyTest.Create)
+		tests.GET("/:id", h.Admin.ConcurrencyTest.Get)
+		tests.PUT("/:id", h.Admin.ConcurrencyTest.Update)
+		tests.DELETE("/:id", h.Admin.ConcurrencyTest.Delete)
+		tests.POST("/:id/run", h.Admin.ConcurrencyTest.Run)
+		tests.GET("/:id/runs", h.Admin.ConcurrencyTest.ListRuns)
+		tests.GET("/runs/:run_id/logs", h.Admin.ConcurrencyTest.ListLogs)
+	}
 }
 
 func registerErrorPassthroughRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

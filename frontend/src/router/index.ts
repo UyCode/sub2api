@@ -489,6 +489,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/accounts/concurrency-tests',
+    name: 'AdminConcurrencyTests',
+    component: () => import('@/views/admin/ConcurrencyTestsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Concurrency Tests',
+      titleKey: 'admin.concurrencyTests.title',
+      descriptionKey: 'admin.concurrencyTests.description'
+    }
+  },
+  {
     path: '/admin/announcements',
     name: 'AdminAnnouncements',
     component: () => import('@/views/admin/AnnouncementsView.vue'),
