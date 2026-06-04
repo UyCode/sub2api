@@ -43,7 +43,21 @@ type ForwardNativeOption func(*geminiImageAssetTransformOptions)
 
 func WithForwardNativeImageAssetURLTransform(enabled bool) ForwardNativeOption {
 	return func(opts *geminiImageAssetTransformOptions) {
-		opts.Enabled = enabled
+		opts.Enabled = true
+		opts.UpstreamSupportsURLAssets = enabled
+		opts.StripResponseFormatRequest = !enabled
+	}
+}
+
+func geminiImageAssetTransformOptionsForAccount(account *Account) geminiImageAssetTransformOptions {
+	upstreamSupportsURL := false
+	if account != nil {
+		upstreamSupportsURL = account.IsImageAssetURLTransformEnabled()
+	}
+	return geminiImageAssetTransformOptions{
+		Enabled:                    true,
+		UpstreamSupportsURLAssets:  upstreamSupportsURL,
+		StripResponseFormatRequest: !upstreamSupportsURL,
 	}
 }
 
@@ -1126,6 +1140,9 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			apply(&forwardOpts)
 		}
 	}
+	accountOpts := geminiImageAssetTransformOptionsForAccount(account)
+	accountOpts.Enabled = forwardOpts.Enabled || accountOpts.Enabled
+	forwardOpts = accountOpts
 
 	if strings.TrimSpace(originalModel) == "" {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Missing model in URL")
@@ -1152,22 +1169,13 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	// Some Gemini upstreams validate tool call parts strictly; ensure any `functionCall` part includes a
 	// `thoughtSignature` to avoid frequent INVALID_ARGUMENT 400s.
 	body = ensureGeminiFunctionCallThoughtSignatures(body)
+	forwardOpts.ResponseFormat = extractGeminiImageResponseFormat(body)
 
 	imageInputSize := s.extractImageInputSize(body)
 	imageSize := normalizeOpenAIImageSizeTier(imageInputSize)
 
-	if forwardOpts.Enabled && action != "countTokens" {
-		if s.settingService == nil {
-			return nil, s.writeGoogleError(c, http.StatusInternalServerError, "image asset storage is not configured")
-		}
-		if err := s.settingService.EnsureImageAssetStorageReady(ctx); err != nil {
-			status := infraerrors.Code(err)
-			if status <= 0 {
-				status = http.StatusInternalServerError
-			}
-			return nil, s.writeGoogleError(c, status, infraerrors.Message(err))
-		}
-		rewrittenBody, _, err := transformGeminiImageAssetRequest(ctx, s.settingService, body)
+	if action != "countTokens" {
+		rewrittenBody, _, err := transformGeminiImageAssetRequestWithOptions(ctx, s.settingService, body, forwardOpts)
 		if err != nil {
 			status := infraerrors.Code(err)
 			if status <= 0 {
@@ -1629,7 +1637,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			}
 			b, _ := json.Marshal(collected)
 			if forwardOpts.Enabled {
-				transformed, _, err := transformGeminiImageAssetResponse(ctx, s.settingService, b)
+				transformed, _, err := transformGeminiImageAssetResponseWithOptions(ctx, s.settingService, b, forwardOpts)
 				if err != nil {
 					return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to upload Gemini image response assets")
 				}
@@ -2571,7 +2579,7 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 		if c != nil && c.Request != nil {
 			ctx = c.Request.Context()
 		}
-		transformed, _, err := transformGeminiImageAssetResponse(ctx, s.settingService, respBody)
+		transformed, _, err := transformGeminiImageAssetResponseWithOptions(ctx, s.settingService, respBody, forwardOpts)
 		if err != nil {
 			return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to upload Gemini image response assets")
 		}
@@ -2664,7 +2672,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 						usage = u
 					}
 					if forwardOpts.Enabled {
-						transformed, changed, err := transformGeminiImageAssetResponse(ctx, s.settingService, rawBytes)
+						transformed, changed, err := transformGeminiImageAssetResponseWithOptions(ctx, s.settingService, rawBytes, forwardOpts)
 						if err != nil {
 							return nil, err
 						}

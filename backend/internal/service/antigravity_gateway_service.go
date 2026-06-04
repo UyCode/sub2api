@@ -2101,6 +2101,7 @@ type forwardGeminiOptions struct {
 	groupID                int64
 	sessionHash            string
 	imageAssetURLTransform bool
+	imageAssetOptions      geminiImageAssetTransformOptions
 }
 
 func WithForwardGeminiSession(groupID int64, sessionHash string) ForwardGeminiOption {
@@ -2112,7 +2113,10 @@ func WithForwardGeminiSession(groupID int64, sessionHash string) ForwardGeminiOp
 
 func WithForwardGeminiImageAssetURLTransform(enabled bool) ForwardGeminiOption {
 	return func(opts *forwardGeminiOptions) {
-		opts.imageAssetURLTransform = enabled
+		opts.imageAssetURLTransform = true
+		opts.imageAssetOptions.Enabled = true
+		opts.imageAssetOptions.UpstreamSupportsURLAssets = enabled
+		opts.imageAssetOptions.StripResponseFormatRequest = !enabled
 	}
 }
 
@@ -2124,6 +2128,9 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 			apply(&forwardOpts)
 		}
 	}
+	accountAssetOpts := geminiImageAssetTransformOptionsForAccount(account)
+	forwardOpts.imageAssetURLTransform = true
+	forwardOpts.imageAssetOptions = accountAssetOpts
 
 	sessionID := getSessionID(c)
 	prefix := logPrefix(sessionID, account.Name)
@@ -2193,18 +2200,9 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	if err != nil {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Invalid request body")
 	}
+	forwardOpts.imageAssetOptions.ResponseFormat = extractGeminiImageResponseFormat(injectedBody)
 	if forwardOpts.imageAssetURLTransform {
-		if s.settingService == nil {
-			return nil, s.writeGoogleError(c, http.StatusInternalServerError, "image asset storage is not configured")
-		}
-		if err := s.settingService.EnsureImageAssetStorageReady(ctx); err != nil {
-			status := infraerrors.Code(err)
-			if status <= 0 {
-				status = http.StatusInternalServerError
-			}
-			return nil, s.writeGoogleError(c, status, infraerrors.Message(err))
-		}
-		rewrittenBody, _, err := transformGeminiImageAssetRequest(ctx, s.settingService, injectedBody)
+		rewrittenBody, _, err := transformGeminiImageAssetRequestWithOptions(ctx, s.settingService, injectedBody, forwardOpts.imageAssetOptions)
 		if err != nil {
 			status := infraerrors.Code(err)
 			if status <= 0 {
@@ -2492,7 +2490,7 @@ handleSuccess:
 
 	if stream {
 		// 客户端要求流式，直接透传
-		streamRes, err := s.handleGeminiStreamingResponse(c, resp, startTime, geminiImageAssetTransformOptions{Enabled: forwardOpts.imageAssetURLTransform})
+		streamRes, err := s.handleGeminiStreamingResponse(c, resp, startTime, forwardOpts.imageAssetOptions)
 		if err != nil {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=stream_error error=%v", prefix, err)
 			return nil, err
@@ -2502,7 +2500,7 @@ handleSuccess:
 		clientDisconnect = streamRes.clientDisconnect
 	} else {
 		// 客户端要求非流式，收集流式响应后返回
-		streamRes, err := s.handleGeminiStreamToNonStreaming(c, resp, startTime, geminiImageAssetTransformOptions{Enabled: forwardOpts.imageAssetURLTransform})
+		streamRes, err := s.handleGeminiStreamToNonStreaming(c, resp, startTime, forwardOpts.imageAssetOptions)
 		if err != nil {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=stream_collect_error error=%v", prefix, err)
 			return nil, err
@@ -3290,7 +3288,7 @@ func (s *AntigravityGatewayService) handleGeminiStreamingResponse(c *gin.Context
 					}
 				}
 				if forwardOpts.Enabled && inner != nil {
-					transformed, changed, err := transformGeminiImageAssetResponse(ctx, s.settingService, inner)
+					transformed, changed, err := transformGeminiImageAssetResponseWithOptions(ctx, s.settingService, inner, forwardOpts)
 					if err != nil {
 						return nil, err
 					}
@@ -3532,7 +3530,7 @@ returnResponse:
 		return nil, fmt.Errorf("failed to marshal response: %w", err)
 	}
 	if forwardOpts.Enabled {
-		transformed, _, err := transformGeminiImageAssetResponse(ctx, s.settingService, respBody)
+		transformed, _, err := transformGeminiImageAssetResponseWithOptions(ctx, s.settingService, respBody, forwardOpts)
 		if err != nil {
 			return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to upload Gemini image response assets")
 		}

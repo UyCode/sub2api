@@ -82,6 +82,56 @@
         </div>
       </div>
 
+      <!-- Image URL wrapper compatibility -->
+      <div
+        v-if="hasImageAssetURLTransformTargets"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="mb-3 flex items-center justify-between">
+          <div class="flex-1 pr-4">
+            <label
+              id="bulk-edit-image-asset-url-transform-label"
+              class="input-label mb-0"
+              for="bulk-edit-image-asset-url-transform-enabled"
+            >
+              {{ t('admin.accounts.imageAssetURLTransform', 'Image URL wrapper compatible') }}
+            </label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.imageAssetURLTransformHint', 'Enable when this upstream account supports image URL inputs and response_format=url.') }}
+            </p>
+          </div>
+          <input
+            v-model="enableImageAssetURLTransform"
+            id="bulk-edit-image-asset-url-transform-enabled"
+            type="checkbox"
+            aria-controls="bulk-edit-image-asset-url-transform-body"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div
+          id="bulk-edit-image-asset-url-transform-body"
+          :class="!enableImageAssetURLTransform && 'pointer-events-none opacity-50'"
+          role="group"
+          aria-labelledby="bulk-edit-image-asset-url-transform-label"
+        >
+          <button
+            type="button"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              imageAssetURLTransformEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+            @click="imageAssetURLTransformEnabled = !imageAssetURLTransformEnabled"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                imageAssetURLTransformEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+      </div>
+
       <!-- Base URL (API Key only) -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -1216,6 +1266,13 @@ const allOpenAIAPIKey = computed(() => {
   )
 })
 
+const hasImageAssetURLTransformTargets = computed(() =>
+  targetSelectedPlatforms.value.length > 0 &&
+  targetSelectedPlatforms.value.every(
+    platform => platform === 'openai' || platform === 'gemini' || platform === 'antigravity'
+  )
+)
+
 // 是否全部为 Anthropic OAuth/SetupToken（RPM 配置仅在此条件下显示）
 const allAnthropicOAuthOrSetupToken = computed(() => {
   return (
@@ -1267,6 +1324,7 @@ const enableCodexCLIOnlyAllowClaudeCode = ref(false)
 const enableOpenAICompactMode = ref(false)
 const enableOpenAICompactModelMapping = ref(false)
 const enableRpmLimit = ref(false)
+const enableImageAssetURLTransform = ref(false)
 
 // State - field values
 const submitting = ref(false)
@@ -1295,6 +1353,7 @@ const codexCLIOnlyAllowClaudeCodeEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAICompactModelMappings = ref<ModelMapping[]>([])
 const rpmLimitEnabled = ref(false)
+const imageAssetURLTransformEnabled = ref(false)
 const bulkBaseRpm = ref<number | null>(null)
 const bulkRpmStrategy = ref<'tiered' | 'sticky_exempt'>('tiered')
 const bulkRpmStickyBuffer = ref<number | null>(null)
@@ -1491,6 +1550,11 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     }
   }
 
+  if (enableImageAssetURLTransform.value && hasImageAssetURLTransformTargets.value) {
+    const extra = ensureExtra()
+    extra.image_asset_url_transform = imageAssetURLTransformEnabled.value
+  }
+
   if (enableModelRestriction.value && !isOpenAIModelRestrictionDisabled.value) {
     // 统一使用 model_mapping 字段
     if (modelRestrictionMode.value === 'whitelist') {
@@ -1656,6 +1720,7 @@ const handleSubmit = async () => {
     enableCodexCLIOnlyAllowClaudeCode.value ||
     enableOpenAICompactMode.value ||
     enableOpenAICompactModelMapping.value ||
+    (enableImageAssetURLTransform.value && hasImageAssetURLTransformTargets.value) ||
     enableRpmLimit.value ||
     userMsgQueueMode.value !== null
 
@@ -1760,6 +1825,7 @@ watch(
       enableOpenAICompactMode.value = false
       enableOpenAICompactModelMapping.value = false
       enableRpmLimit.value = false
+      enableImageAssetURLTransform.value = false
 
       // Reset all values
       baseUrl.value = ''
@@ -1784,6 +1850,7 @@ watch(
       openAICompactMode.value = 'auto'
       openAICompactModelMappings.value = []
       rpmLimitEnabled.value = false
+      imageAssetURLTransformEnabled.value = false
       bulkBaseRpm.value = null
       bulkRpmStrategy.value = 'tiered'
       bulkRpmStickyBuffer.value = null

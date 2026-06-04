@@ -1325,6 +1325,35 @@
         <p class="input-hint">{{ t('admin.accounts.expiresAtHint') }}</p>
       </div>
 
+      <div
+        v-if="supportsImageAssetURLTransformAccount"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.imageAssetURLTransform', 'Image URL wrapper compatible') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.imageAssetURLTransformHint', 'Enable when this upstream account supports image URL inputs and response_format=url.') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            @click="imageAssetURLTransformEnabled = !imageAssetURLTransformEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              imageAssetURLTransformEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                imageAssetURLTransformEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+      </div>
+
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
       <div
         v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'apikey')"
@@ -2578,6 +2607,7 @@ const customBaseUrl = ref('')
 
 // OpenAI 自动透传开关（OAuth/API Key）
 const openaiPassthroughEnabled = ref(false)
+const imageAssetURLTransformEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
@@ -2760,12 +2790,31 @@ const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, ev
 }
 
 const applyOpenAIEndpointCapabilities = (credentials: Record<string, unknown>) => {
-  const capabilities = normalizeOpenAIEndpointCapabilities(openAIEndpointCapabilities.value)
-  if (capabilities.length === 2) {
+	const capabilities = normalizeOpenAIEndpointCapabilities(openAIEndpointCapabilities.value)
+	if (capabilities.length === 2) {
     delete credentials.openai_capabilities
     return
   }
-  credentials.openai_capabilities = capabilities
+	credentials.openai_capabilities = capabilities
+}
+const supportsImageAssetURLTransformAccount = computed(() =>
+  props.account?.platform === 'openai' || props.account?.platform === 'gemini' || props.account?.platform === 'antigravity'
+)
+const applyImageAssetURLTransformExtra = (extra: Record<string, unknown>): Record<string, unknown> => {
+  if (!supportsImageAssetURLTransformAccount.value) {
+    delete extra.image_asset_url_transform
+    delete extra.image_asset_url_transform_enabled
+    delete extra.image_url_wrapper_enabled
+    return extra
+  }
+  if (imageAssetURLTransformEnabled.value) {
+    extra.image_asset_url_transform = true
+  } else {
+    extra.image_asset_url_transform = false
+    delete extra.image_asset_url_transform_enabled
+    delete extra.image_url_wrapper_enabled
+  }
+  return extra
 }
 const normalizeOpenAIResponsesMode = (mode: unknown): OpenAIResponsesMode => {
   if (mode === 'force_responses' || mode === 'force_chat_completions') {
@@ -2963,6 +3012,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAllowClaudeCodeEnabled.value = false
   codexImageGenerationBridgeMode.value = 'inherit'
+  imageAssetURLTransformEnabled.value = extra?.image_asset_url_transform === true ||
+    extra?.image_asset_url_transform_enabled === true ||
+    extra?.image_url_wrapper_enabled === true
   anthropicPassthroughEnabled.value = false
   webSearchEmulationMode.value = 'default'
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'apikey')) {
@@ -4205,6 +4257,10 @@ const handleSubmit = async () => {
       writeQuotaNotifyToExtra(newExtra, 'update')
       updatePayload.extra = newExtra
     }
+
+    const currentExtra = (updatePayload.extra as Record<string, unknown>) ||
+      ((props.account.extra as Record<string, unknown>) || {})
+    updatePayload.extra = applyImageAssetURLTransformExtra({ ...currentExtra })
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
       await submitUpdateAccount(accountID, updatePayload)
