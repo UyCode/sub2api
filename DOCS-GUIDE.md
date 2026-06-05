@@ -1,32 +1,71 @@
-现在要生成我们中转站的文档，底层要用Mintlify作为文档生成，在这个项目下面创建一个子项目作为接口文档，你要做：
-1. 生成的文档要针对GPT-Image-2 (生图和编辑图），Nano Banana 2 和 Nano Banana Pro (生图和编辑图）
-2. 文档的内容可以从APIYI里面抄过来，但是涉及到状态码时，可以参考BananaRouter
-3. 要求文档要非常专业，包括接入，参数，QA，价格，注意事项等
-4. 目前只针对这3个图片模型的1k, 2k, 4k价格也要有说明
-5. DOCS文档必须要非常专业，UI要非常美观，符合现代化。
+# Mintlify 图片模型文档子项目
 
----
-参考页面如下：
-网站：
-https://docs.apiyi.com
-https://bananarouter.com/docs/models
+本仓库的接口文档站位于 `docs-mintlify/`，是独立 Mintlify 子项目，不依赖 `backend/` 或 `frontend/` 业务代码。
 
-GPT-Image-2:
-概览：https://docs.apiyi.com/api-capabilities/gpt-image-2/overview
-文生图：https://docs.apiyi.com/api-capabilities/gpt-image-2/text-to-image
-编辑图：https://docs.apiyi.com/api-capabilities/gpt-image-2/image-edit
+## 本地开发
 
-Nano-Banana-2:
-概览：https://docs.apiyi.com/api-capabilities/nano-banana-2-image/overview
-文生图：https://docs.apiyi.com/api-capabilities/nano-banana-2-image/text-to-image
-编辑图：https://docs.apiyi.com/api-capabilities/nano-banana-2-image/image-edit
+```bash
+cd docs-mintlify
+npm install
+npm run dev
+```
 
-Nano-Banana-Pro:
-概览：https://docs.apiyi.com/api-capabilities/nano-banana-image/overview
-文生图：https://docs.apiyi.com/api-capabilities/nano-banana-image/text-to-image
-编辑图：https://docs.apiyi.com/api-capabilities/nano-banana-image/image-edit
+也可以直接使用 Mintlify CLI：
 
----
+```bash
+cd docs-mintlify
+npm run dev
+```
 
-状态码，一些表格等信息可以参考https://bananarouter.com/docs/models页面
-我上次尝试的Demo在https://gruogu.mintlify.app/，你可以参考，但要比demo更强，更专业，UI要更漂亮
+本地预览默认会启动在 `http://localhost:3000`。如果端口被占用，Mintlify 会提示实际端口。
+
+## 校验
+
+```bash
+cd docs-mintlify
+npm run check
+```
+
+`npm run check` 会执行：
+
+- `mint validate`：检查 `docs.json`、MDX 语法和构建配置。
+- `mint broken-links`：检查站内断链。
+
+提交前建议在仓库根目录额外运行：
+
+```bash
+git diff --check -- docs-mintlify DOCS-GUIDE.md
+git diff -- docs-mintlify DOCS-GUIDE.md
+```
+
+## 文档范围
+
+当前只覆盖 3 个图片模型：
+
+| 产品展示名 | API 模型 ID | 接口族 |
+| --- | --- | --- |
+| GPT-Image-2 | `gpt-image-2` | OpenAI Images |
+| Nano Banana 2 | `gemini-3.1-flash-image-preview` | Gemini Native |
+| Nano Banana Pro | `gemini-3-pro-image-preview` | Gemini Native |
+
+GPT-Image-2 使用：
+
+- `POST /v1/images/generations`
+- `POST /v1/images/edits`
+
+Nano Banana 2 / Pro 使用：
+
+- `POST /v1beta/models/{model}:generateContent`
+
+Gemini Native 的编辑图不是独立 `/edits` 路由，而是在 `contents[].parts[]` 中加入图片 part，例如 `inlineData` 或上传服务返回的 `fileData`。
+
+## 发布前替换项
+
+- 将文档里的 `https://YOUR_DOMAIN` 替换为实际中转站域名。
+- 确认 `Authorization: Bearer $SUB2API_API_KEY` 是否符合对外命名。
+- 如价格变化，按 `DOCS-INTERNAL-MAINTENANCE.md` 更新内部价格配置，再运行 `node docs-internal/sync-pricing.mjs` 和 `npm run check`。
+- 如果后端状态码或 failover 策略变化，同步更新 `reference/errors.mdx` 和 `reference/faq.mdx`。
+
+## 内容来源口径
+
+文档内容以本站中转站接口口径重新整理，参考 APIYI 的模型能力说明、BananaRouter 的状态码/模型表述，以及当前 sub2api 对 OpenAI Images、Gemini Native、图片尺寸档位和账号切换的实现事实。不要直接大段复制第三方原文。
