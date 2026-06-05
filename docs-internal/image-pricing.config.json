@@ -1,0 +1,45 @@
+{
+  "currency": "USD",
+  "effectiveDate": "2026-06-04",
+  "billingBasis": "per_successful_generated_or_edited_image",
+  "unitLabel": "次",
+  "sizeTiers": ["1K", "2K", "4K"],
+  "models": [
+    {
+      "displayName": "GPT-Image-2",
+      "modelId": "gpt-image-2",
+      "family": "OpenAI Images",
+      "prices": {
+        "1K": "0.060",
+        "2K": "0.090",
+        "4K": "0.150"
+      },
+      "note": "按成功生成或编辑的图片次数扣费。"
+    },
+    {
+      "displayName": "Nano Banana 2",
+      "modelId": "gemini-3.1-flash-image-preview",
+      "family": "Gemini Native",
+      "prices": {
+        "1K": "0.035",
+        "2K": "0.045",
+        "4K": "0.070"
+      },
+      "extraTiers": {
+        "512px": "0.025"
+      },
+      "note": "按成功生成或编辑的图片次数扣费；512px 可作为低分辨率预览档。"
+    },
+    {
+      "displayName": "Nano Banana Pro",
+      "modelId": "gemini-3-pro-image-preview",
+      "family": "Gemini Native",
+      "prices": {
+        "1K": "0.090",
+        "2K": "0.090",
+        "4K": "0.090"
+      },
+      "note": "按成功生成或编辑的图片次数扣费；1K/2K/4K 当前同价。"
+    }
+  ]
+}
