@@ -2506,6 +2506,35 @@
         <p class="input-hint">{{ t('admin.accounts.expiresAtHint') }}</p>
       </div>
 
+      <div
+        v-if="supportsImageAssetURLTransformAccount"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.imageAssetURLTransform', 'Image URL wrapper compatible') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.imageAssetURLTransformHint', 'Enable when this upstream account supports image URL inputs and response_format=url.') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            @click="imageAssetURLTransformEnabled = !imageAssetURLTransformEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              imageAssetURLTransformEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                imageAssetURLTransformEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+      </div>
+
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
       <div
         v-if="form.platform === 'openai'"
@@ -3414,6 +3443,7 @@ const customErrorCodeInput = ref<number | null>(null)
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
 const openaiPassthroughEnabled = ref(false)
+const imageAssetURLTransformEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
@@ -3525,19 +3555,41 @@ const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, ev
 }
 
 const applyOpenAIEndpointCapabilities = (credentials: Record<string, unknown>) => {
-  const capabilities = normalizeOpenAIEndpointCapabilities(openAIEndpointCapabilities.value)
-  if (capabilities.length === 2) {
-    delete credentials.openai_capabilities
+	const capabilities = normalizeOpenAIEndpointCapabilities(openAIEndpointCapabilities.value)
+	if (capabilities.length === 2) {
+		delete credentials.openai_capabilities
     return
   }
-  credentials.openai_capabilities = capabilities
+	credentials.openai_capabilities = capabilities
+}
+
+const supportsImageAssetURLTransformAccount = computed(() =>
+  form.platform === 'openai' || form.platform === 'gemini' || form.platform === 'antigravity'
+)
+
+const applyImageAssetURLTransformExtra = (
+  platform: AccountPlatform,
+  extra?: Record<string, unknown>
+): Record<string, unknown> | undefined => {
+  if (platform !== 'openai' && platform !== 'gemini' && platform !== 'antigravity') {
+    return extra
+  }
+  const next: Record<string, unknown> = { ...(extra || {}) }
+  if (imageAssetURLTransformEnabled.value) {
+    next.image_asset_url_transform = true
+  } else {
+    delete next.image_asset_url_transform
+    delete next.image_asset_url_transform_enabled
+    delete next.image_url_wrapper_enabled
+  }
+  return Object.keys(next).length > 0 ? next : undefined
 }
 
 function buildAntigravityExtra(): Record<string, unknown> | undefined {
-  const extra: Record<string, unknown> = {}
-  if (mixedScheduling.value) extra.mixed_scheduling = true
-  if (allowOverages.value) extra.allow_overages = true
-  return Object.keys(extra).length > 0 ? extra : undefined
+	const extra: Record<string, unknown> = {}
+	if (mixedScheduling.value) extra.mixed_scheduling = true
+	if (allowOverages.value) extra.allow_overages = true
+	return applyImageAssetURLTransformExtra('antigravity', Object.keys(extra).length > 0 ? extra : undefined)
 }
 
 const buildOpenAICompactModelMapping = () =>
@@ -3846,6 +3898,9 @@ watch(
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       codexCLIOnlyEnabled.value = false
       codexCLIOnlyAllowClaudeCodeEnabled.value = false
+    }
+    if (!['openai', 'gemini', 'antigravity'].includes(newPlatform)) {
+      imageAssetURLTransformEnabled.value = false
     }
     if (newPlatform !== 'anthropic') {
       anthropicPassthroughEnabled.value = false
@@ -4241,6 +4296,7 @@ const resetForm = () => {
   interceptWarmupRequests.value = false
   autoPauseOnExpired.value = true
   openaiPassthroughEnabled.value = false
+  imageAssetURLTransformEnabled.value = false
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
@@ -4299,9 +4355,9 @@ const handleClose = () => {
 }
 
 const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknown> | undefined => {
-  if (form.platform !== 'openai') {
-    return base
-  }
+	if (form.platform !== 'openai') {
+		return base
+	}
 
   const extra: Record<string, unknown> = { ...(base || {}) }
   if (accountCategory.value === 'oauth-based') {
@@ -4351,7 +4407,7 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     delete extra.openai_responses_mode
   }
 
-  return Object.keys(extra).length > 0 ? extra : undefined
+	return applyImageAssetURLTransformExtra('openai', Object.keys(extra).length > 0 ? extra : undefined)
 }
 
 const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unknown> | undefined => {
@@ -4726,10 +4782,10 @@ const createAccountAndFinish = async (
   if (!applyTempUnschedConfig(credentials)) {
     return
   }
-  // Inject quota limits for apikey/bedrock accounts
-  let finalExtra = extra
-  if (type === 'apikey' || type === 'bedrock') {
-    const quotaExtra: Record<string, unknown> = { ...(extra || {}) }
+	// Inject quota limits for apikey/bedrock accounts
+	let finalExtra = applyImageAssetURLTransformExtra(platform, extra)
+	if (type === 'apikey' || type === 'bedrock') {
+		const quotaExtra: Record<string, unknown> = { ...(finalExtra || {}) }
     if (editQuotaLimit.value != null && editQuotaLimit.value > 0) {
       quotaExtra.quota_limit = editQuotaLimit.value
     }
@@ -4755,9 +4811,10 @@ const createAccountAndFinish = async (
     // Quota notify config
     writeQuotaNotifyToExtra(quotaExtra, 'create')
     if (Object.keys(quotaExtra).length > 0) {
-      finalExtra = quotaExtra
-    }
-  }
+			finalExtra = quotaExtra
+		}
+	}
+	finalExtra = applyImageAssetURLTransformExtra(platform, finalExtra)
   if (platform === 'openai') {
     if (type === 'apikey') {
       applyOpenAIEndpointCapabilities(credentials)
@@ -4916,8 +4973,8 @@ const handleOpenAIImportCodexSession = async (content: string) => {
 
   try {
     const extra = buildOpenAIExtra()
-    const result = await adminAPI.accounts.importCodexSession({
-      content: trimmed,
+		const result = await adminAPI.accounts.importCodexSession({
+			content: trimmed,
       name: form.name,
       notes: form.notes || null,
       proxy_id: form.proxy_id,
@@ -4929,7 +4986,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
       expires_at: form.expires_at,
       auto_pause_on_expired: autoPauseOnExpired.value,
       credential_extras: Object.keys(credentialExtras).length > 0 ? credentialExtras : undefined,
-      extra,
+			extra: applyImageAssetURLTransformExtra('openai', extra),
       update_existing: true
     })
 
@@ -5144,7 +5201,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           platform: 'antigravity',
           type: 'oauth',
           credentials,
-          extra: {},
+					extra: applyImageAssetURLTransformExtra('antigravity', {}),
           proxy_id: form.proxy_id,
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,

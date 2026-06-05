@@ -141,6 +141,13 @@ func TestAdminService_ListGroups_PassesSortParams(t *testing.T) {
 	}, repo.listWithFiltersParams)
 }
 
+func TestDefaultModelsListCandidateIDs_GeminiIncludesImagePreviewModels(t *testing.T) {
+	candidates := defaultModelsListCandidateIDs(PlatformGemini)
+
+	require.Contains(t, candidates, "gemini-3-pro-image-preview")
+	require.Contains(t, candidates, "gemini-3.1-flash-image-preview")
+}
+
 // TestAdminService_CreateGroup_WithImagePricing 测试创建分组时 ImagePrice 字段正确传递
 func TestAdminService_CreateGroup_WithImagePricing(t *testing.T) {
 	repo := &groupRepoStubForAdmin{}

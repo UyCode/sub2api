@@ -354,21 +354,6 @@
               </div>
             </div>
 
-            <!-- Image Asset URL Transform (OpenAI/Gemini) -->
-            <div v-if="section.platform === 'openai' || section.platform === 'gemini'" class="border-t border-gray-200 pt-3 dark:border-dark-600">
-              <div class="flex items-center justify-between gap-4">
-                <div>
-                  <label class="text-xs font-medium text-gray-700 dark:text-gray-300">
-                    {{ t('admin.channels.form.imageAssetURLTransform', 'Image URL wrapper') }}
-                  </label>
-                  <p class="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">
-                    {{ t('admin.channels.form.imageAssetURLTransformHint', 'Upload base64 image inputs/outputs to S3-compatible storage and pass URLs instead.') }}
-                  </p>
-                </div>
-                <Toggle v-model="section.image_asset_url_transform" />
-              </div>
-            </div>
-
             <!-- Bedrock CC Compatibility (Anthropic only) -->
             <div v-if="section.platform === 'anthropic'" class="border-t border-gray-200 pt-3 dark:border-dark-600">
               <div class="flex items-center justify-between gap-4">
@@ -699,7 +684,6 @@ interface PlatformSection {
   model_pricing: PricingFormEntry[]
   web_search_emulation: boolean
   codex_image_generation_bridge: boolean
-  image_asset_url_transform: boolean
   bedrock_cc_compat: boolean
   account_stats_pricing_rules: FormPricingRule[]
 }
@@ -797,7 +781,6 @@ function addPlatformSection(platform: GroupPlatform) {
     model_pricing: [],
     web_search_emulation: false,
     codex_image_generation_bridge: false,
-    image_asset_url_transform: false,
     bedrock_cc_compat: false,
     account_stats_pricing_rules: [],
   })
@@ -1159,18 +1142,7 @@ function formToAPI(): { group_ids: number[], model_pricing: ChannelModelPricing[
     delete featuresConfig.codex_image_generation_bridge
   }
 
-  const imageAssetURLTransform: Record<string, boolean> = {}
-  for (const section of form.platforms) {
-    if (!section.enabled) continue
-    if (section.platform === 'openai' || section.platform === 'gemini') {
-      imageAssetURLTransform[section.platform] = !!section.image_asset_url_transform
-    }
-  }
-  if (Object.keys(imageAssetURLTransform).length > 0) {
-    featuresConfig.image_asset_url_transform = imageAssetURLTransform
-  } else {
-    delete featuresConfig.image_asset_url_transform
-  }
+  delete featuresConfig.image_asset_url_transform
 
   const bedrockCCCompat: Record<string, boolean> = {}
   for (const section of form.platforms) {
@@ -1235,8 +1207,6 @@ function apiToForm(channel: Channel): PlatformSection[] {
     const webSearchEnabled = wsEmulation?.[platform] === true
     const codexImageGenerationBridge = fc?.codex_image_generation_bridge as Record<string, boolean> | undefined
     const codexImageGenerationBridgeEnabled = codexImageGenerationBridge?.[platform] === true
-    const imageAssetURLTransform = fc?.image_asset_url_transform as Record<string, boolean> | undefined
-    const imageAssetURLTransformEnabled = imageAssetURLTransform?.[platform] === true
     const bedrockCCCompat = fc?.bedrock_cc_compat as Record<string, boolean> | undefined
     const bedrockCCCompatEnabled = bedrockCCCompat?.[platform] === true
 
@@ -1249,7 +1219,6 @@ function apiToForm(channel: Channel): PlatformSection[] {
       model_pricing: pricing,
       web_search_emulation: webSearchEnabled,
       codex_image_generation_bridge: codexImageGenerationBridgeEnabled,
-      image_asset_url_transform: imageAssetURLTransformEnabled,
       bedrock_cc_compat: bedrockCCCompatEnabled,
       account_stats_pricing_rules: [],
     })

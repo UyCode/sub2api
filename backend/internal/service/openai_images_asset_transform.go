@@ -5,13 +5,17 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
 const openAIImagesJSONContentType = "application/json"
+const imageAssetResponseURLDownloadTimeout = 30 * time.Second
 
 type OpenAIImagesAssetTransformResult struct {
 	Body        []byte
@@ -60,6 +64,47 @@ func (s *OpenAIGatewayService) TransformOpenAIImagesAssets(
 	return &OpenAIImagesAssetTransformResult{Body: body, Parsed: next, Transformed: false}, nil
 }
 
+func (s *OpenAIGatewayService) TransformOpenAIImagesAssetsForAccount(
+	ctx context.Context,
+	account *Account,
+	body []byte,
+	parsed *OpenAIImagesRequest,
+) (*OpenAIImagesAssetTransformResult, error) {
+	if !s.isImageAssetURLTransformEnabledForAccount(account) {
+		return &OpenAIImagesAssetTransformResult{Body: body, Parsed: parsed}, nil
+	}
+	if s == nil || s.settingService == nil {
+		return nil, infraerrors.InternalServer("IMAGE_ASSET_STORAGE_NOT_CONFIGURED", "image asset storage is not configured")
+	}
+	if err := s.settingService.EnsureImageAssetStorageReady(ctx); err != nil {
+		return nil, err
+	}
+	next := parsed.Clone()
+	next.AssetURLTransformEnabled = true
+	if next.IsEdits() {
+		if next.Multipart {
+			rewrittenBody, rewrittenParsed, err := s.transformOpenAIImagesMultipartInput(ctx, next)
+			if err != nil {
+				return nil, err
+			}
+			return &OpenAIImagesAssetTransformResult{Body: rewrittenBody, Parsed: rewrittenParsed, Transformed: true}, nil
+		}
+		rewrittenBody, changed, err := transformOpenAIImagesJSONInputAssets(ctx, s.settingService, body)
+		if err != nil {
+			return nil, err
+		}
+		if changed {
+			parsedAfter, err := parseOpenAIImagesJSONBytes(rewrittenBody, next.Endpoint, next.ContentType)
+			if err != nil {
+				return nil, err
+			}
+			parsedAfter.AssetURLTransformEnabled = true
+			return &OpenAIImagesAssetTransformResult{Body: rewrittenBody, Parsed: parsedAfter, Transformed: true}, nil
+		}
+	}
+	return &OpenAIImagesAssetTransformResult{Body: body, Parsed: next, Transformed: false}, nil
+}
+
 func (s *OpenAIGatewayService) isImageAssetURLTransformEnabled(ctx context.Context, groupID *int64) bool {
 	if s == nil || groupID == nil || s.channelService == nil {
 		return false
@@ -69,6 +114,16 @@ func (s *OpenAIGatewayService) isImageAssetURLTransformEnabled(ctx context.Conte
 		return false
 	}
 	return ch.IsImageAssetURLTransformEnabled(PlatformOpenAI)
+}
+
+func (s *OpenAIGatewayService) isImageAssetURLTransformEnabledForAccount(account *Account) bool {
+	if account == nil {
+		return false
+	}
+	if override := account.ImageAssetURLTransformOverride(); override != nil {
+		return *override
+	}
+	return false
 }
 
 func (r *OpenAIImagesRequest) Clone() *OpenAIImagesRequest {
@@ -349,6 +404,7 @@ func walkOpenAIImagesResponseAssets(ctx context.Context, uploader imageAssetUplo
 	switch value := node.(type) {
 	case map[string]any:
 		changed := false
+		returnB64JSON := shouldReturnOpenAIImagesB64JSON(parsed)
 		contentTypeHint := firstNonEmptyString(value["mime_type"], value["content_type"])
 		if contentTypeHint == "" && parsed != nil {
 			contentTypeHint = openAIImageOutputMIMEType(parsed.OutputFormat)
@@ -363,13 +419,14 @@ func walkOpenAIImagesResponseAssets(ctx context.Context, uploader imageAssetUplo
 				if err != nil {
 					return false, err
 				}
-				value["url"] = url
-				delete(value, "b64_json")
-				changed = true
+				if !returnB64JSON {
+					value["url"] = url
+					delete(value, "b64_json")
+					changed = true
+				}
 			}
-		}
-		if raw, ok := value["url"].(string); ok {
-			data, contentType, decoded, err := decodeImageAssetString(raw, contentTypeHint)
+		} else if raw, ok := value["url"].(string); ok {
+			data, contentType, decoded, err := decodeImageAssetURL(ctx, raw, contentTypeHint)
 			if err != nil {
 				return false, err
 			}
@@ -378,7 +435,12 @@ func walkOpenAIImagesResponseAssets(ctx context.Context, uploader imageAssetUplo
 				if err != nil {
 					return false, err
 				}
-				value["url"] = url
+				if returnB64JSON {
+					value["b64_json"] = base64.StdEncoding.EncodeToString(data)
+					delete(value, "url")
+				} else {
+					value["url"] = url
+				}
 				changed = true
 			}
 		}
@@ -403,6 +465,82 @@ func walkOpenAIImagesResponseAssets(ctx context.Context, uploader imageAssetUplo
 	default:
 		return false, nil
 	}
+}
+
+func decodeImageAssetURL(ctx context.Context, raw string, contentTypeHint string) ([]byte, string, bool, error) {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(raw)), "data:") {
+		return decodeImageAssetString(raw, contentTypeHint)
+	}
+	if !isImageAssetHTTPURL(raw) {
+		return nil, "", false, nil
+	}
+	return downloadImageAssetURL(ctx, raw, contentTypeHint)
+}
+
+func isImageAssetHTTPURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed == nil || parsed.Host == "" {
+		return false
+	}
+	return parsed.Scheme == "http" || parsed.Scheme == "https"
+}
+
+func downloadImageAssetURL(ctx context.Context, raw string, contentTypeHint string) ([]byte, string, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, imageAssetResponseURLDownloadTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(raw), nil)
+	if err != nil {
+		return nil, "", false, infraerrors.BadRequest("INVALID_IMAGE_ASSET_URL", "invalid image URL")
+	}
+	req.Header.Set("Accept", "image/*,*/*;q=0.8")
+	req.Header.Set("User-Agent", openAIImageBackendUserAgent)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, "", false, infraerrors.ServiceUnavailable("IMAGE_ASSET_URL_DOWNLOAD_FAILED", "failed to download upstream image URL")
+	}
+	defer func() {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, "", false, infraerrors.ServiceUnavailable("IMAGE_ASSET_URL_DOWNLOAD_FAILED", "failed to download upstream image URL")
+	}
+	if resp.ContentLength > openAIImageMaxDownloadBytes {
+		return nil, "", false, infraerrors.BadRequest("IMAGE_ASSET_URL_TOO_LARGE", "upstream image URL is too large")
+	}
+	limited := io.LimitReader(resp.Body, openAIImageMaxDownloadBytes+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, "", false, infraerrors.ServiceUnavailable("IMAGE_ASSET_URL_DOWNLOAD_FAILED", "failed to read upstream image URL")
+	}
+	if len(data) > openAIImageMaxDownloadBytes {
+		return nil, "", false, infraerrors.BadRequest("IMAGE_ASSET_URL_TOO_LARGE", "upstream image URL is too large")
+	}
+	contentType := firstNonEmptyString(contentTypeHint, resp.Header.Get("Content-Type"))
+	if comma := strings.Index(contentType, ";"); comma >= 0 {
+		contentType = contentType[:comma]
+	}
+	detected := http.DetectContentType(data)
+	if !strings.HasPrefix(detected, "image/") && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "image/") {
+		return nil, "", false, infraerrors.BadRequest("INVALID_IMAGE_ASSET_URL", "upstream URL did not return an image")
+	}
+	if strings.HasPrefix(detected, "image/") && (strings.TrimSpace(contentType) == "" || strings.EqualFold(strings.TrimSpace(contentType), "application/octet-stream")) {
+		contentType = detected
+	}
+	if strings.TrimSpace(contentType) == "" {
+		contentType = detected
+	}
+	return data, strings.TrimSpace(contentType), true, nil
+}
+
+func shouldReturnOpenAIImagesB64JSON(parsed *OpenAIImagesRequest) bool {
+	if parsed == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(parsed.ResponseFormat), "b64_json")
 }
 
 func decodeImageAssetString(raw string, contentTypeHint string) ([]byte, string, bool, error) {

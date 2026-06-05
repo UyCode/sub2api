@@ -59,6 +59,22 @@ func (c *Channel) IsImageAssetURLTransformEnabled(platform string) bool {
 	return override != nil && *override
 }
 
+func (a *Account) ImageAssetURLTransformOverride() *bool {
+	if a == nil || a.Extra == nil {
+		return nil
+	}
+	if override := boolOverrideFromMap(a.Extra, featureKeyImageAssetURLTransform, "image_asset_url_transform_enabled", "image_url_wrapper_enabled"); override != nil {
+		return override
+	}
+	platformConfig, _ := a.Extra[a.Platform].(map[string]any)
+	return boolOverrideFromMap(platformConfig, featureKeyImageAssetURLTransform, "image_asset_url_transform_enabled", "image_url_wrapper_enabled")
+}
+
+func (a *Account) IsImageAssetURLTransformEnabled() bool {
+	override := a.ImageAssetURLTransformOverride()
+	return override != nil && *override
+}
+
 // CodexImageGenerationBridgeOverride returns the account-level override for Codex
 // image_generation bridge injection. Nil means follow the channel/global policy.
 func (a *Account) CodexImageGenerationBridgeOverride() *bool {

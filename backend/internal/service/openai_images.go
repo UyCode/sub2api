@@ -580,6 +580,17 @@ func (s *OpenAIGatewayService) ForwardImages(
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed images request is required")
 	}
+	transformResult, err := s.TransformOpenAIImagesAssetsForAccount(ctx, account, body, parsed)
+	if err != nil {
+		return nil, err
+	}
+	if transformResult != nil {
+		body = transformResult.Body
+		parsed = transformResult.Parsed
+	}
+	if parsed != nil {
+		parsed.AssetURLTransformEnabled = true
+	}
 	switch account.Type {
 	case AccountTypeAPIKey:
 		return s.forwardOpenAIImagesAPIKey(ctx, c, account, body, parsed, channelMappedModel)

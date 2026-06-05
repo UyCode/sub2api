@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -63,8 +64,8 @@ func TestTransformOpenAIImagesJSONInputAssets_RewritesDataURLAndB64JSON(t *testi
 	require.Equal(t, "https://cdn.example.com/mask.png", gjson.GetBytes(rewritten, "mask.image_url").String())
 	require.False(t, gjson.GetBytes(rewritten, "mask.b64_json").Exists())
 	require.Len(t, uploader.uploads, 2)
-	require.Equal(t, "source-bytes", string(uploader.uploads[0].data))
-	require.Equal(t, "mask-bytes", string(uploader.uploads[1].data))
+	uploadedData := []string{string(uploader.uploads[0].data), string(uploader.uploads[1].data)}
+	require.ElementsMatch(t, []string{"source-bytes", "mask-bytes"}, uploadedData)
 }
 
 func TestTransformOpenAIImagesResponseBody_RewritesB64JSONToURL(t *testing.T) {
@@ -79,6 +80,70 @@ func TestTransformOpenAIImagesResponseBody_RewritesB64JSONToURL(t *testing.T) {
 	require.False(t, gjson.GetBytes(rewritten, "data.0.b64_json").Exists())
 	require.Len(t, uploader.uploads, 1)
 	require.Equal(t, "response", uploader.uploads[0].kind)
+}
+
+func TestTransformOpenAIImagesResponseBody_RespectsExplicitB64JSON(t *testing.T) {
+	uploader := &fakeImageAssetUploader{urls: []string{"https://cdn.example.com/out.png"}}
+	parsed := &OpenAIImagesRequest{AssetURLTransformEnabled: true, ResponseFormat: "b64_json", OutputFormat: "png"}
+	body := []byte(`{"created":1,"data":[{"b64_json":"b3V0LWJ5dGVz"}]}`)
+
+	rewritten, changed, err := (&openAIImagesResponseTransformHarness{uploader: uploader}).transform(context.Background(), parsed, body)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.JSONEq(t, string(body), string(rewritten))
+	require.Equal(t, "b3V0LWJ5dGVz", gjson.GetBytes(rewritten, "data.0.b64_json").String())
+	require.False(t, gjson.GetBytes(rewritten, "data.0.url").Exists())
+	require.Len(t, uploader.uploads, 1)
+	require.Equal(t, "response", uploader.uploads[0].kind)
+	require.Equal(t, "out-bytes", string(uploader.uploads[0].data))
+}
+
+func TestTransformOpenAIImagesResponseBody_ExplicitB64JSONConvertsDataURLBackToB64(t *testing.T) {
+	uploader := &fakeImageAssetUploader{urls: []string{"https://cdn.example.com/out.png"}}
+	parsed := &OpenAIImagesRequest{AssetURLTransformEnabled: true, ResponseFormat: "b64_json", OutputFormat: "png"}
+	body := []byte(`{"created":1,"data":[{"url":"data:image/png;base64,b3V0LWJ5dGVz"}]}`)
+
+	rewritten, changed, err := (&openAIImagesResponseTransformHarness{uploader: uploader}).transform(context.Background(), parsed, body)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "b3V0LWJ5dGVz", gjson.GetBytes(rewritten, "data.0.b64_json").String())
+	require.False(t, gjson.GetBytes(rewritten, "data.0.url").Exists())
+	require.Len(t, uploader.uploads, 1)
+	require.Equal(t, "response", uploader.uploads[0].kind)
+	require.Equal(t, "out-bytes", string(uploader.uploads[0].data))
+}
+
+func TestTransformOpenAIImagesResponseBody_DownloadsUpstreamURLForURLOutput(t *testing.T) {
+	imageBytes := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+		0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+		0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+		0x00, 0x03, 0x01, 0x01, 0x00, 0xc9, 0xfe, 0x92,
+		0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+		0x44, 0xae, 0x42, 0x60, 0x82,
+	}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(imageBytes)
+	}))
+	defer upstream.Close()
+
+	uploader := &fakeImageAssetUploader{urls: []string{"https://cdn.example.com/response.png"}}
+	parsed := &OpenAIImagesRequest{AssetURLTransformEnabled: true, ResponseFormat: "url", OutputFormat: "png"}
+	body := []byte(`{"created":1,"data":[{"url":"` + upstream.URL + `/image.png"}]}`)
+
+	rewritten, changed, err := (&openAIImagesResponseTransformHarness{uploader: uploader}).transform(context.Background(), parsed, body)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "https://cdn.example.com/response.png", gjson.GetBytes(rewritten, "data.0.url").String())
+	require.False(t, gjson.GetBytes(rewritten, "data.0.b64_json").Exists())
+	require.Len(t, uploader.uploads, 1)
+	require.Equal(t, "response", uploader.uploads[0].kind)
+	require.Equal(t, imageBytes, uploader.uploads[0].data)
+	require.Equal(t, "image/png", uploader.uploads[0].contentType)
 }
 
 type openAIImagesResponseTransformHarness struct {

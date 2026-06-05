@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -107,21 +106,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsed.Stream, false)))
 
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, requestModel)
-	transformResult, err := h.gatewayService.TransformOpenAIImagesAssets(c.Request.Context(), apiKey.GroupID, body, parsed)
-	if err != nil {
-		appErr := infraerrors.FromError(err)
-		status := int(appErr.Code)
-		errType := "api_error"
-		if status < http.StatusInternalServerError {
-			errType = "invalid_request_error"
-		}
-		h.errorResponse(c, status, errType, appErr.Message)
-		return
-	}
-	if transformResult != nil {
-		body = transformResult.Body
-		parsed = transformResult.Parsed
-	}
 
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
