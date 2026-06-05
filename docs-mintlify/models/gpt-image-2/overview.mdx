@@ -1,0 +1,94 @@
+---
+title: "GPT-Image-2 概览"
+description: "GPT-Image-2 的模型定位、接口、尺寸、当前价格和生产注意事项。"
+---
+
+`gpt-image-2` 是通过 DeepToken 暴露的 OpenAI Images 官方能力代理模型。它适合需要 OpenAI SDK 兼容、精确控制 `size` / `quality` / `output_format`、以及需要文生图和参考图编辑的客户场景。
+
+## 接口一览
+
+| 能力 | 方法 | 路径 |
+| --- | --- | --- |
+| 文生图 | `POST` | `https://YOUR_DOMAIN/v1/images/generations` |
+| 编辑图 | `POST` | `https://YOUR_DOMAIN/v1/images/edits` |
+
+<CardGroup cols={2}>
+  <Card title="文生图" icon="sparkles" href="./text-to-image">
+    输入文本提示词生成图片，支持尺寸、画质、输出格式和 URL 形式返回。
+  </Card>
+  <Card title="图片编辑" icon="wand-sparkles" href="./image-edit">
+    输入参考图和编辑指令，可做多图融合、风格迁移和局部编辑。
+  </Card>
+</CardGroup>
+
+## 模型能力
+
+| 维度 | 说明 |
+| --- | --- |
+| 实际模型 ID | `gpt-image-2` |
+| 接口协议 | OpenAI Images compatible |
+| 输出尺寸 | `1K` / `2K` / `4K` 档位，支持 `1024x1024`、`2048x1152`、`3840x2160` 等尺寸 |
+| 输出格式 | `png`、`jpeg`、`webp`，具体可用值以官方能力为准 |
+| 返回图片 | 默认推荐 URL 形式：`data[].url` |
+| 单次数量 | 生产建议按 `n=1` 处理，多张图由客户端并发或队列控制 |
+| 编辑输入 | JSON 图片 URL/base64 或 multipart 文件上传 |
+
+<Note>
+  DeepToken 对输出图片统一推荐 URL 形式。相比 base64，URL 响应更小、更快，也能减少中转服务器带宽占用。base64 兼容字段仍可用于历史系统迁移。
+</Note>
+
+## 当前价格
+
+{/* pricing:gpt-image-2:start */}
+| 档位 | 当前价格 | 说明 |
+| --- | ---: | --- |
+| `1K` | $0.060/次 | 常规生成与编辑 |
+| `2K` | $0.090/次 | 高清物料 |
+| `4K` | $0.150/次 | 高分辨率或终稿素材 |
+{/* pricing:gpt-image-2:end */}
+
+<Warning>
+  GPT-Image-2 按成功生成或编辑的图片次数扣费。图片请求不会要求你按 token 估算价格；选择尺寸档位即可。
+</Warning>
+
+## 尺寸档位
+
+DeepToken 会将图片尺寸归一到 `1K`、`2K`、`4K`：
+
+| 档位 | 常见尺寸 | 说明 |
+| --- | --- | --- |
+| `1K` | `1024x1024`、`1536x1024`、`1024x1536` | 最长边不超过 1024 或接近 1K 的预设 |
+| `2K` | `2048x2048`、`2048x1152` | 最长边不超过 2048；未知尺寸默认按 2K 兜底 |
+| `4K` | `3840x2160`、`2160x3840` | 更高分辨率输出，耗时和成本波动更明显 |
+
+<Note>
+  计费记录会优先使用官方返回的输出尺寸判断档位；没有输出尺寸时使用请求输入尺寸；仍无法识别时默认 `2K`。
+</Note>
+
+## 生产注意事项
+
+<AccordionGroup>
+  <Accordion title="超时配置" icon="timer">
+    图片生成比文本请求慢得多。1K 低画质可以用较短超时验证链路；2K/4K 或高画质建议客户端超时至少 300 到 600 秒，并提供前端进度反馈。
+  </Accordion>
+  <Accordion title="输入图片成本" icon="image-up">
+    编辑图会将参考图作为输入内容处理。参考图越多、越大，请求耗时通常越长。生产环境建议只传必要图片，并优先使用 HTTPS URL。
+  </Accordion>
+  <Accordion title="错误与重试" icon="refresh-cw">
+    400 类参数错误不要重试；429 需要指数退避；502/503/504 可短退避重试 1 到 2 次。详见 [状态码与重试](../../reference/errors)。
+  </Accordion>
+  <Accordion title="断开连接" icon="plug-zap">
+    同步图片请求一旦进入官方生成阶段，即使客户端断开，也可能继续生成并计费。不要把断连当作取消任务机制。
+  </Accordion>
+</AccordionGroup>
+
+## 推荐阅读
+
+<CardGroup cols={2}>
+  <Card title="文生图 API" icon="code" href="./text-to-image">
+    查看参数表、cURL 和 Python 示例。
+  </Card>
+  <Card title="图片编辑 API" icon="layers" href="./image-edit">
+    查看 JSON 与 multipart 两种编辑图写法。
+  </Card>
+</CardGroup>

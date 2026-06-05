@@ -1,0 +1,195 @@
+---
+title: "快速开始"
+description: "配置鉴权、Base URL、请求体和 URL 形式图片返回流程。"
+---
+
+本页展示两条接入路径：`gpt-image-2` 走 OpenAI Images，Nano Banana 2 / Pro 走 Gemini Native。所有示例都使用 `Authorization: Bearer $SUB2API_API_KEY`。
+
+## 前置条件
+
+<Steps>
+  <Step title="获取 API Key">
+    在你的 DeepToken 中转站创建 API Key，并确认该 Key 绑定的分组已启用图片生成和编辑权限。
+  </Step>
+  <Step title="确认模型权限">
+    `gpt-image-2` 使用 OpenAI 官方能力代理；Nano Banana 2 / Pro 使用 Gemini 官方能力代理。请确保对应模型路由已启用。
+  </Step>
+  <Step title="设置 Base URL">
+    将示例中的 `https://YOUR_DOMAIN` 替换为你的 DeepToken 中转站域名。
+  </Step>
+</Steps>
+
+## 鉴权
+
+```bash
+Authorization: Bearer $SUB2API_API_KEY
+Content-Type: application/json
+```
+
+<Note>
+  Gemini Native 路由也推荐使用 Bearer Token 调用 DeepToken。网关会按账号类型、模型路由和官方鉴权要求处理转发。
+</Note>
+
+## 选择接口
+
+<Tabs>
+  <Tab title="GPT-Image-2">
+    ```bash
+    # 文生图
+    POST https://YOUR_DOMAIN/v1/images/generations
+
+    # 编辑图
+    POST https://YOUR_DOMAIN/v1/images/edits
+    ```
+
+    请求体兼容 OpenAI Images。编辑图可以使用 multipart 文件上传，也可以在 JSON 中传 `images[].image_url`、`images[].b64_json` 或 `images[].image`。
+  </Tab>
+  <Tab title="Nano Banana 2">
+    ```bash
+    POST https://YOUR_DOMAIN/v1beta/models/gemini-3.1-flash-image-preview:generateContent
+    ```
+
+    文生图和编辑图都使用同一个 Gemini Native 端点。编辑图时在 `contents[].parts[]` 加入 `inlineData` 图片 part。
+  </Tab>
+  <Tab title="Nano Banana Pro">
+    ```bash
+    POST https://YOUR_DOMAIN/v1beta/models/gemini-3-pro-image-preview:generateContent
+    ```
+
+    Pro 与 Nano Banana 2 的请求结构一致，差异主要在模型 ID、价格、速度和画质定位。
+  </Tab>
+</Tabs>
+
+## 图片返回策略
+
+DeepToken 对输出图片统一推荐 URL 形式：
+
+| 协议 | 推荐读取字段 | 说明 |
+| --- | --- | --- |
+| OpenAI Images | `data[].url` | 请求中设置 `response_format: "url"` |
+| Gemini Native | `candidates[].content.parts[].fileData.fileUri` | 网关优先返回可下载 URL；兼容场景仍可能看到 `inlineData.data` |
+
+URL 形式可以让客户端更快拿到结果，并减少响应体体积。base64 本身会比原始二进制图片大约 33%，不仅增加客户端等待时间，也会消耗更多中转服务器带宽。只有在必须离线封装、不能访问外部 URL 或兼容历史代码时，才建议请求或处理 base64。
+
+<Tip>
+  图片上传服务上线后，编辑图可先把本地图片上传为 HTTPS URL，再在请求中传 `image_url` 或 Gemini `fileData.fileUri`，避免把大图 base64 放进主请求体。
+</Tip>
+
+## OpenAI Images 最小请求
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST "https://YOUR_DOMAIN/v1/images/generations" \
+  -H "Authorization: Bearer $SUB2API_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image-2",
+    "prompt": "A clean product render of a transparent mechanical keyboard on a soft studio background.",
+    "size": "1024x1024",
+    "quality": "low",
+    "response_format": "url"
+  }'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="SUB2API_API_KEY",
+    base_url="https://YOUR_DOMAIN/v1",
+)
+
+result = client.images.generate(
+    model="gpt-image-2",
+    prompt="A clean product render of a transparent mechanical keyboard.",
+    size="1024x1024",
+    quality="low",
+    response_format="url",
+)
+
+image_url = result.data[0].url
+print(image_url)
+```
+
+</CodeGroup>
+
+## Gemini Native 最小请求
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST "https://YOUR_DOMAIN/v1beta/models/gemini-3.1-flash-image-preview:generateContent" \
+  -H "Authorization: Bearer $SUB2API_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contents": [{
+      "parts": [{
+        "text": "Generate a 2K hero image for a premium API gateway dashboard, clean and realistic."
+      }]
+    }],
+    "generationConfig": {
+      "responseModalities": ["IMAGE"],
+      "imageConfig": {
+        "aspectRatio": "16:9",
+        "imageSize": "2K"
+      }
+    }
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "https://YOUR_DOMAIN/v1beta/models/gemini-3.1-flash-image-preview:generateContent",
+    headers={
+        "Authorization": "Bearer SUB2API_API_KEY",
+        "Content-Type": "application/json",
+    },
+    json={
+        "contents": [{
+            "parts": [{"text": "Generate a 2K hero image for a premium API gateway dashboard."}]
+        }],
+        "generationConfig": {
+            "responseModalities": ["IMAGE"],
+            "imageConfig": {"aspectRatio": "16:9", "imageSize": "2K"},
+        },
+    },
+    timeout=300,
+)
+response.raise_for_status()
+data = response.json()
+
+image_url = None
+for part in data["candidates"][0]["content"]["parts"]:
+    file_data = part.get("fileData")
+    if file_data and file_data.get("fileUri"):
+        image_url = file_data["fileUri"]
+        break
+
+print(image_url)
+```
+
+</CodeGroup>
+
+## 上线检查
+
+<Warning>
+  生产业务不要只依赖单一图片渠道。如果预计 QPS 超过 50，请提前联系 DeepToken；当资源紧张时接口可能返回 `529`，你的系统应具备退避、排队、备用渠道或降级方案。
+</Warning>
+
+<AccordionGroup>
+  <Accordion title="为什么建议先用低规格跑通？" icon="gauge">
+    图片模型的失败排查通常被长耗时放大。先用 1K 或 512px 验证鉴权、模型名、请求体、超时、URL 读取和保存逻辑，再提高到 2K / 4K，可以更快定位非画质问题。
+  </Accordion>
+  <Accordion title="当前支持哪些模型？" icon="list-checks">
+    当前仅支持 GPT-Image-2、Nano Banana 2、Nano Banana Pro。请求中分别使用 `gpt-image-2`、`gemini-3.1-flash-image-preview`、`gemini-3-pro-image-preview`。
+  </Accordion>
+  <Accordion title="按什么价格计费？" icon="badge-dollar-sign">
+    当前图片接口按成功生成或编辑的图片次数扣费。GPT-Image-2、Nano Banana 2 和 Nano Banana Pro 的 1K / 2K / 4K 当前价格见 [价格与计费档位](./reference/pricing)。
+  </Accordion>
+  <Accordion title="还支持 base64 吗？" icon="file-image">
+    支持兼容处理。OpenAI Images 可请求 `b64_json`，Gemini 官方响应也可能包含 `inlineData.data`。生产链路仍建议优先使用 URL，因为 base64 响应体更大、传输更慢，也更占用中转带宽。
+  </Accordion>
+</AccordionGroup>

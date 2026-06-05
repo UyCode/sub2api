@@ -1,0 +1,101 @@
+---
+title: "图片模型接口文档"
+description: "通过 DeepToken 官方能力代理接入 GPT-Image-2、Nano Banana 2 与 Nano Banana Pro 的图像生成和编辑能力。"
+---
+
+DeepToken Image Gateway 是面向客户的 OpenAI / Gemini 官方能力代理与中转服务。你可以用熟悉的 OpenAI Images 或 Gemini Native 协议接入 `gpt-image-2`、`gemini-3.1-flash-image-preview` 和 `gemini-3-pro-image-preview`，同时获得统一鉴权、账号调度、按次计费和 URL 形式图片返回。
+
+文档中的请求域名使用 `https://YOUR_DOMAIN` 占位，实际调用时替换为你的 DeepToken 中转站域名。
+
+<CardGroup cols={3}>
+  <Card title="GPT-Image-2" icon="image" href="./models/gpt-image-2/overview">
+    OpenAI Images 兼容。适合精确控制尺寸、画质、输出格式，并需要 OpenAI SDK 低改造接入的场景。
+  </Card>
+  <Card title="Nano Banana 2" icon="sparkles" href="./models/nano-banana-2/overview">
+    Gemini 3.1 Flash Image Preview。适合速度、成本和高分辨率并重的生产图像生成与编辑。
+  </Card>
+  <Card title="Nano Banana Pro" icon="palette" href="./models/nano-banana-pro/overview">
+    Gemini 3 Pro Image Preview。适合对画质、文字渲染、多图编辑和商业素材有更高要求的场景。
+  </Card>
+</CardGroup>
+
+## 接入路径
+
+<Tabs>
+  <Tab title="OpenAI Images">
+    `gpt-image-2` 使用 OpenAI Images 路由。
+
+    ```bash
+    POST https://YOUR_DOMAIN/v1/images/generations
+    POST https://YOUR_DOMAIN/v1/images/edits
+    ```
+  </Tab>
+  <Tab title="Gemini Native">
+    Nano Banana 2 / Pro 使用 Gemini 原生 `generateContent` 路由。编辑图不是独立 `/edits` 端点，而是在 `contents[].parts[]` 中加入图片 part。
+
+    ```bash
+    POST https://YOUR_DOMAIN/v1beta/models/gemini-3.1-flash-image-preview:generateContent
+    POST https://YOUR_DOMAIN/v1beta/models/gemini-3-pro-image-preview:generateContent
+    ```
+  </Tab>
+</Tabs>
+
+## 模型速查
+
+| 产品名 | 实际模型 ID | 接口族 | 生成 | 编辑 | 计费展示 |
+| --- | --- | --- | --- | --- | --- |
+| GPT-Image-2 | `gpt-image-2` | OpenAI Images | `/v1/images/generations` | `/v1/images/edits` | 1K / 2K / 4K 按成功图片次数扣费 |
+| Nano Banana 2 | `gemini-3.1-flash-image-preview` | Gemini Native | `:generateContent` | `:generateContent` + `inlineData` | 512px / 1K / 2K / 4K 按成功图片次数扣费 |
+| Nano Banana Pro | `gemini-3-pro-image-preview` | Gemini Native | `:generateContent` | `:generateContent` + `inlineData` | 1K / 2K / 4K 按成功图片次数扣费 |
+
+<Warning>
+  当前仅支持 GPT-Image-2、Nano Banana 2、Nano Banana Pro。`Nano Banana 2` 和 `Nano Banana Pro` 是产品展示名，API 请求中必须使用实际模型 ID，例如 `gemini-3.1-flash-image-preview` 或 `gemini-3-pro-image-preview`。
+</Warning>
+
+## 当前价格
+
+{/* pricing:public-table:start */}
+| 模型 | 1K | 2K | 4K | 计费口径 |
+| --- | ---: | ---: | ---: | --- |
+| GPT-Image-2 | $0.060/次 | $0.090/次 | $0.150/次 | 生成/编辑同价 |
+| Nano Banana 2 | $0.035/次 | $0.045/次 | $0.070/次 | 生成/编辑同价；512px 为 $0.025/次 |
+| Nano Banana Pro | $0.090/次 | $0.090/次 | $0.090/次 | 生成/编辑同价；当前三档同价 |
+{/* pricing:public-table:end */}
+
+## 返回图片
+
+DeepToken 对图片输出统一推荐 URL 形式。OpenAI Images 示例使用 `response_format: "url"`；Gemini Native 响应中优先读取 `fileData.fileUri`。URL 形式可以让客户端更快拿到结果，也能避免 base64 体积膨胀约 33% 带来的传输时间和中转带宽浪费。
+
+## 生产建议
+
+<CardGroup cols={2}>
+  <Card title="先跑低规格验证链路" icon="check-circle" href="./quickstart">
+    新接入先用 1K 或 512px、较低画质跑通鉴权、超时、保存图片和错误处理，再提高到 2K / 4K。
+  </Card>
+  <Card title="按当前价格表接入" icon="badge-dollar-sign" href="./reference/pricing">
+    三个模型的 1K / 2K / 4K 当前价格已明确列出，文生图和编辑图按同一档位计费。
+  </Card>
+  <Card title="为图片请求配置更长超时" icon="timer" href="./reference/faq">
+    4K、高画质和高峰拥塞会显著拉长尾延迟。客户端不要沿用文本模型的短超时。
+  </Card>
+  <Card title="区分本地错误和官方错误" icon="triangle-alert" href="./reference/errors">
+    401/403/429/503 可能来自中转站鉴权、余额、并发，也可能来自官方模型服务。排查时先看响应体和请求 ID。
+  </Card>
+  <Card title="高并发提前沟通" icon="activity" href="./reference/faq">
+    如果预计图片请求 QPS 超过 50，请提前联系 DeepToken；核心业务也应准备备用渠道。
+  </Card>
+</CardGroup>
+
+## 下一步
+
+<Steps>
+  <Step title="完成基础接入">
+    阅读 [快速开始](./quickstart)，选择 OpenAI Images 或 Gemini Native。
+  </Step>
+  <Step title="选择模型页面">
+    查看对应模型的概览、文生图和编辑图示例。
+  </Step>
+  <Step title="上线前确认价格和错误处理">
+    对照 [价格说明](./reference/pricing) 与 [状态码与重试](./reference/errors) 完成生产检查。
+  </Step>
+</Steps>

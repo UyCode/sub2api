@@ -1,0 +1,84 @@
+---
+title: "价格与计费档位"
+description: "GPT-Image-2、Nano Banana 2 和 Nano Banana Pro 的 1K/2K/4K 当前价格、计费口径和扣费说明。"
+---
+
+本文只覆盖 3 个图片模型：`gpt-image-2`、`gemini-3.1-flash-image-preview`、`gemini-3-pro-image-preview`。DeepToken 图片接口当前按“成功生成或编辑的图片次数”计费，文生图和编辑图采用同一档位价格。
+
+## 当前价格表
+
+{/* pricing:public-table:start */}
+| 模型 | 1K | 2K | 4K | 计费口径 |
+| --- | ---: | ---: | ---: | --- |
+| GPT-Image-2 | $0.060/次 | $0.090/次 | $0.150/次 | 生成/编辑同价 |
+| Nano Banana 2 | $0.035/次 | $0.045/次 | $0.070/次 | 生成/编辑同价；512px 为 $0.025/次 |
+| Nano Banana Pro | $0.090/次 | $0.090/次 | $0.090/次 | 生成/编辑同价；当前三档同价 |
+{/* pricing:public-table:end */}
+
+<Tip>
+  Nano Banana 2 还提供 `512px` 低分辨率预览档，当前价格为 `$0.025/次`。该档位适合缩略图、快速预览和低成本批量草稿，不作为 1K/2K/4K 主售卖表的一部分。
+</Tip>
+
+## 档位归一
+
+| 档位 | 归一规则 | 常见输入 |
+| --- | --- | --- |
+| `1K` | 最长边不超过 1024，或显式 `1K` | `1024x1024`、`1536x1024`、`1024x1536`、`1K` |
+| `2K` | 最长边不超过 2048，或显式 `2K` | `2048x2048`、`2048x1152`、`2K` |
+| `4K` | 大于 2K 的高分辨率，或显式 `4K` | `3840x2160`、`2160x3840`、`4K` |
+| 默认 | 无法识别尺寸时按 `2K` 兜底 | `auto`、空值、非标准尺寸 |
+
+计费记录优先使用模型返回的输出尺寸判断档位；没有输出尺寸时使用请求输入尺寸；仍无法识别时默认 `2K`。
+
+## 计费口径
+
+<Tabs>
+  <Tab title="单图请求">
+    一次请求成功返回 1 张图片，就按对应模型和尺寸档位扣 1 次。例如 Nano Banana 2 生成一张 2K 图片，按 `$0.045/次` 计费。
+  </Tab>
+  <Tab title="编辑图">
+    编辑图与文生图同价。一次编辑请求成功返回 1 张 4K 图片，就按该模型的 4K 档位扣 1 次。
+  </Tab>
+  <Tab title="多图请求">
+    如果一次请求返回多张图片，按实际成功返回的图片张数计费。生产接入建议先按单图请求跑通保存、超时和错误处理，再扩展多图并发。
+  </Tab>
+</Tabs>
+
+## 模型说明
+
+<AccordionGroup>
+  <Accordion title="GPT-Image-2" icon="image">
+    当前 1K 为 `$0.060/次`，2K 为 `$0.090/次`，4K 为 `$0.150/次`。适合 OpenAI Images 兼容接入、精确尺寸控制、参考图编辑和对 OpenAI SDK 低改造的业务。
+  </Accordion>
+  <Accordion title="Nano Banana 2" icon="sparkles">
+    当前 1K 为 `$0.035/次`，2K 为 `$0.045/次`，4K 为 `$0.070/次`。`512px` 预览档为 `$0.025/次`，适合快速草稿和低成本预览。
+  </Accordion>
+  <Accordion title="Nano Banana Pro" icon="palette">
+    当前 1K、2K、4K 均为 `$0.090/次`。Pro 更适合终稿、海报、品牌素材、文字渲染和复杂参考图编辑。
+  </Accordion>
+</AccordionGroup>
+
+## 账单字段理解
+
+| 字段 | 含义 |
+| --- | --- |
+| `image_count` | 本次请求实际计费图片数量 |
+| `image_size` | 归一后的 `1K` / `2K` / `4K` 档位 |
+| `image_input_size` | 请求输入或推断的尺寸 |
+| `image_output_size` | 模型返回的输出尺寸 |
+| `image_size_source` | 档位来源：`output`、`input`、`default` 或历史记录 |
+| `total_cost` | 本次请求按模型、档位和图片数量计算出的费用 |
+
+## 常见问题
+
+<AccordionGroup>
+  <Accordion title="GPT-Image-2 是否需要按 token 估算？" icon="badge-alert">
+    不需要。客户接入时按成功图片次数和 1K/2K/4K 档位理解即可。
+  </Accordion>
+  <Accordion title="失败请求会扣费吗？" icon="receipt">
+    本地鉴权失败、参数错误、队列拒绝等通常不会产生成功图片计费。若请求已经进入图片生成阶段并最终成功返回图片，则可能产生对应图片费用。
+  </Accordion>
+  <Accordion title="为什么未知尺寸按 2K？" icon="circle-help">
+    无法识别尺寸时系统默认 `2K`。如果业务大量使用 `auto`，建议在产品侧明确展示实际请求尺寸或固定使用 1K/2K/4K。
+  </Accordion>
+</AccordionGroup>

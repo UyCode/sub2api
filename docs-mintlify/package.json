@@ -1,0 +1,15 @@
+{
+  "name": "sub2api-image-docs",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Mintlify documentation for Sub2API image model relay endpoints.",
+  "scripts": {
+    "dev": "npx mint@latest dev",
+    "validate": "npx mint@latest validate",
+    "links": "npx mint@latest broken-links",
+    "check": "npx mint@latest validate && npx mint@latest broken-links"
+  },
+  "devDependencies": {
+    "mint": "latest"
+  }
+}

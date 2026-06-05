@@ -1,0 +1,70 @@
+---
+title: "Nano Banana 2 概览"
+description: "Nano Banana 2 的 Gemini Native 接入、能力、当前价格和生产注意事项。"
+---
+
+Nano Banana 2 是 `gemini-3.1-flash-image-preview` 的产品展示名。它通过 DeepToken 暴露 Gemini 官方图像能力，使用 Gemini Native `generateContent` 协议，适合追求速度、成本和高分辨率平衡的图片生成与编辑场景。
+
+## 接口
+
+```http
+POST https://YOUR_DOMAIN/v1beta/models/gemini-3.1-flash-image-preview:generateContent
+```
+
+<CardGroup cols={2}>
+  <Card title="文生图" icon="sparkles" href="./text-to-image">
+    使用 `contents[].parts[].text` 描述画面，并在 `imageConfig` 中选择宽高比和分辨率。
+  </Card>
+  <Card title="图片编辑" icon="images" href="./image-edit">
+    使用一个文本 part 加一个或多个 `inlineData` / `fileData` 图片 part 完成编辑和多图融合。
+  </Card>
+</CardGroup>
+
+## 能力速查
+
+| 维度 | 说明 |
+| --- | --- |
+| 产品名 | Nano Banana 2 |
+| 实际模型 ID | `gemini-3.1-flash-image-preview` |
+| 协议 | Gemini Native REST |
+| 生成端点 | `:generateContent` |
+| 编辑端点 | 同 `:generateContent`，通过图片 part 传图 |
+| 分辨率 | `512` / `1K` / `2K` / `4K` |
+| 宽高比 | 常见比例和超宽/超长比例，具体可用值以官方能力为准 |
+| 返回图片 | 推荐读取 `candidates[].content.parts[].fileData.fileUri` |
+
+<Warning>
+  Nano Banana 2 没有 OpenAI 风格 `/v1/images/edits`。请按 Gemini 原生多模态请求接入。
+</Warning>
+
+## 当前价格
+
+{/* pricing:nano-banana-2:start */}
+| 档位 | 当前价格 | 说明 |
+| --- | ---: | --- |
+| `512px` | $0.025/次 | 低分辨率预览档 |
+| `1K` | $0.035/次 | 常规生成与编辑 |
+| `2K` | $0.045/次 | 高清物料 |
+| `4K` | $0.070/次 | 高分辨率或终稿素材 |
+{/* pricing:nano-banana-2:end */}
+
+<Note>
+  Nano Banana 2 当前按成功生成或编辑的图片次数扣费，文生图和编辑图使用同一价格表。
+</Note>
+
+## 生产建议
+
+<AccordionGroup>
+  <Accordion title="优先用实际模型名" icon="tag">
+    请求中使用 `gemini-3.1-flash-image-preview`。需要 4K 时通过 `generationConfig.imageConfig.imageSize` 指定，不要依赖非标准后缀模型名。
+  </Accordion>
+  <Accordion title="图片 part 与文本 part 分开" icon="braces">
+    每个 `parts[]` 元素只放 `text`、`inlineData` 或 `fileData` 之一。不要在同一个 part 里同时放文本和图片。
+  </Accordion>
+  <Accordion title="输出优先读取 URL" icon="link">
+    DeepToken 会优先把输出图片整理为 URL。生产解析时先找 `fileData.fileUri`，再兼容处理 `inlineData.data`。
+  </Accordion>
+  <Accordion title="设置足够长的超时" icon="timer">
+    4K、高峰并发和复杂提示词会拉长响应时间。生产建议客户端超时至少 300 到 360 秒。
+  </Accordion>
+</AccordionGroup>

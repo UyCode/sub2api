@@ -1,0 +1,65 @@
+---
+title: "Nano Banana Pro 概览"
+description: "Nano Banana Pro 的 Gemini Native 接入、能力定位、当前价格和生产注意事项。"
+---
+
+Nano Banana Pro 是 `gemini-3-pro-image-preview` 的产品展示名。它通过 DeepToken 暴露 Gemini 官方图像能力，面向更高画质、更强文字渲染和商业素材生产，使用 Gemini Native `generateContent` 协议。
+
+## 接口
+
+```http
+POST https://YOUR_DOMAIN/v1beta/models/gemini-3-pro-image-preview:generateContent
+```
+
+<CardGroup cols={2}>
+  <Card title="文生图" icon="sparkles" href="./text-to-image">
+    用文本提示词生成高质量图片，支持 `1K`、`2K`、`4K` 档位和常见宽高比。
+  </Card>
+  <Card title="图片编辑" icon="layers" href="./image-edit">
+    通过图片 part 传入参考图，适合多图融合、品牌素材和局部重构。
+  </Card>
+</CardGroup>
+
+## 能力速查
+
+| 维度 | 说明 |
+| --- | --- |
+| 产品名 | Nano Banana Pro |
+| 实际模型 ID | `gemini-3-pro-image-preview` |
+| 协议 | Gemini Native REST |
+| 生成端点 | `:generateContent` |
+| 编辑端点 | 同 `:generateContent`，通过图片 part 传图 |
+| 分辨率 | `1K` / `2K` / `4K` |
+| 返回图片 | 推荐读取 `candidates[].content.parts[].fileData.fileUri` |
+| 适合场景 | 品牌海报、商业素材、精细文字、复杂参考图编辑 |
+
+## 当前价格
+
+{/* pricing:nano-banana-pro:start */}
+| 档位 | 当前价格 | 说明 |
+| --- | ---: | --- |
+| `1K` | $0.090/次 | 常规生成与编辑 |
+| `2K` | $0.090/次 | 高清物料 |
+| `4K` | $0.090/次 | 高分辨率或终稿素材 |
+{/* pricing:nano-banana-pro:end */}
+
+<Note>
+  Nano Banana Pro 当前按成功生成或编辑的图片次数扣费，1K/2K/4K 同价。
+</Note>
+
+## 何时选择 Pro
+
+<AccordionGroup>
+  <Accordion title="需要终稿画质" icon="badge-check">
+    如果业务对纹理、构图、细节和成片稳定性要求高，优先选择 Nano Banana Pro。
+  </Accordion>
+  <Accordion title="需要文字和商业排版" icon="type">
+    海报、招牌、UI 截图、商品物料等包含文字的场景，Pro 通常更适合作为终稿模型。
+  </Accordion>
+  <Accordion title="复杂参考图编辑" icon="layers">
+    多图融合、品牌色保持、主体结构保真和风格迁移场景，Pro 更适合承担最终出图。
+  </Accordion>
+  <Accordion title="成本优先时选择 Nano Banana 2" icon="badge-dollar-sign">
+    如果主要目标是速度和成本，且画质接近 Pro 即可，优先评估 Nano Banana 2。
+  </Accordion>
+</AccordionGroup>

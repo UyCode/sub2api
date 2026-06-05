@@ -1,0 +1,109 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "maple",
+  "name": "DeepToken Image Gateway",
+  "colors": {
+    "primary": "#0F766E",
+    "light": "#14B8A6",
+    "dark": "#2DD4BF"
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg",
+    "href": "/"
+  },
+  "favicon": "/favicon.svg",
+  "appearance": {
+    "default": "system"
+  },
+  "fonts": {
+    "family": "Inter"
+  },
+  "icons": {
+    "library": "lucide"
+  },
+  "background": {
+    "decoration": "gradient"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "控制台",
+        "href": "https://YOUR_DOMAIN"
+      },
+      {
+        "label": "模型价格",
+        "href": "/reference/pricing"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "快速接入",
+      "href": "/quickstart"
+    }
+  },
+  "footer": {
+    "socials": {}
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "开始",
+        "icon": "rocket",
+        "pages": [
+          {
+            "group": "接入指南",
+            "pages": [
+              "index",
+              "quickstart"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "模型",
+        "icon": "image",
+        "pages": [
+          {
+            "group": "GPT-Image-2",
+            "pages": [
+              "models/gpt-image-2/overview",
+              "models/gpt-image-2/text-to-image",
+              "models/gpt-image-2/image-edit"
+            ]
+          },
+          {
+            "group": "Nano Banana 2",
+            "pages": [
+              "models/nano-banana-2/overview",
+              "models/nano-banana-2/text-to-image",
+              "models/nano-banana-2/image-edit"
+            ]
+          },
+          {
+            "group": "Nano Banana Pro",
+            "pages": [
+              "models/nano-banana-pro/overview",
+              "models/nano-banana-pro/text-to-image",
+              "models/nano-banana-pro/image-edit"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "参考",
+        "icon": "book-open",
+        "pages": [
+          {
+            "group": "生产参考",
+            "pages": [
+              "reference/pricing",
+              "reference/errors",
+              "reference/faq"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

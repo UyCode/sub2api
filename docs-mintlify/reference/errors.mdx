@@ -1,0 +1,140 @@
+---
+title: "状态码与重试"
+description: "图片接口常见状态码、错误响应、重试策略和账号切换说明。"
+---
+
+图片请求链路包含客户端、DeepToken 鉴权/计费/并发、官方模型账号调度和最终模型服务。相同状态码可能来自不同层，排查时先看响应体、请求 ID、网关日志和使用记录。
+
+## 状态码速查
+
+| HTTP 状态码 | 常见来源 | 含义 | 建议处理 |
+| --- | --- | --- | --- |
+| `400` | 本地或官方 | 请求体非法、模型名错误、参数不支持、Gemini part 结构错误 | 修正请求，不要自动重试 |
+| `401` | 本地或官方 | API Key 无效、缺少鉴权、官方凭证失效 | 检查 Bearer Token 和账号状态 |
+| `403` | 本地或官方 | 分组无权限、内容审核拦截、官方权限不足 | 检查分组权限；内容问题需改 prompt |
+| `413` | 本地网关 | 请求体超过限制 | 压缩图片、改用图片 URL 或提高网关限制 |
+| `429` | 本地或官方 | 余额不足、RPM/并发限制、官方限流 | 指数退避；降低并发；检查余额 |
+| `500` | 官方或网关 | 服务错误 | 短退避重试 1 到 2 次 |
+| `502` | DeepToken | 官方错误、账号切换耗尽、官方 5xx 映射 | 观察是否持续；必要时切换账号池 |
+| `503` | 本地或官方 | 无可用账号、队列满、模型暂不可用、529 映射 | 退避重试；必要时切换备用渠道 |
+| `504` | 官方或代理 | 超时 | 提高超时；避免 4K 高画质请求被代理截断 |
+| `529` | DeepToken 或官方 | 资源紧张、过载或容量不足 | 退避重试；核心业务应切换备用渠道 |
+
+<Warning>
+  400 类参数错误和明确内容违规不应该自动重试。429、503、529 才适合退避重试。对于 `529`，核心业务应准备备用渠道或降级方案。
+</Warning>
+
+## 资源紧张错误
+
+当 DeepToken 或官方模型资源紧张时，请求可能返回 `529`。这类错误表示当前链路容量不足、账号池拥塞或官方模型过载，不代表你的请求体一定有问题。
+
+<Steps>
+  <Step title="先做退避重试">
+    使用指数退避，避免立即大量重试造成二次拥塞。建议限制重试次数，并为前端用户提供明确的等待或重试提示。
+  </Step>
+  <Step title="切换备用渠道">
+    不要把 DeepToken 图片服务作为唯一出图渠道。核心业务应准备备用供应商、备用模型、降级尺寸或排队方案。
+  </Step>
+  <Step title="高 QPS 提前报备">
+    如果你的图片请求 QPS 预计超过 50，请提前联系 DeepToken。我们可以协助评估容量、峰值时段和模型档位。
+  </Step>
+</Steps>
+
+## OpenAI Images 错误响应
+
+```json
+{
+  "error": {
+    "type": "not_found_error",
+    "message": "Images API is not supported for this platform"
+  }
+}
+```
+
+常见本地错误：
+
+| 场景 | 响应 |
+| --- | --- |
+| API Key 所属分组不是 OpenAI 平台 | `404` + `Images API is not supported for this platform` |
+| 模型不是 `gpt-image-*` | `400`，提示 images endpoint requires an image model |
+| 编辑图 JSON 缺少 `images[]` | `400`，提示 `images[].image_url is required` |
+| multipart 编辑图缺少文件 | `400`，提示 `image file is required` |
+
+## Gemini Native 错误响应
+
+Gemini Native 使用 Google 风格错误。示例：
+
+```json
+{
+  "error": {
+    "code": 400,
+    "message": "Request body is empty",
+    "status": "INVALID_ARGUMENT"
+  }
+}
+```
+
+常见本地错误：
+
+| 场景 | 响应 |
+| --- | --- |
+| API Key 分组不是 Gemini 平台 | `400` + `API key group platform is not gemini` |
+| 请求体为空 | `400` + `Request body is empty` |
+| 等待队列满 | `429` + `Too many pending requests, please retry later` |
+| 没有可用 Gemini 账号 | `503` + `No available Gemini accounts` |
+
+## 重试策略
+
+<Tabs>
+  <Tab title="客户端建议">
+    | 状态 | 是否重试 | 建议 |
+    | --- | --- | --- |
+    | `400` | 否 | 修请求体、模型名、图片格式或 part 结构 |
+    | `401` / `403` | 通常否 | 检查 key、权限、内容安全；不要盲目重试 |
+    | `413` | 否 | 压缩图片或改 URL |
+    | `429` | 是 | 指数退避，尊重 `Retry-After` |
+    | `500` / `502` / `503` / `504` | 是 | 短退避重试 1 到 2 次，避免雪崩 |
+    | `529` | 是，并准备备用渠道 | 资源紧张或容量不足；退避后仍失败时切换备用出图方案 |
+  </Tab>
+  <Tab title="网关行为">
+    OpenAI 路径会对部分官方错误触发 failover，例如 `401/402/403/429/529` 和 `>=500`。账号池模式还可能先做同账号短重试，再按配置切换账号。
+
+    Gemini Native 路径会对 `429/500/502/503/504/529` 等状态做自动重试，并在可行时切换账号。特定 Google 项目权限类 400 也可能触发 failover。
+  </Tab>
+</Tabs>
+
+## 超时建议
+
+| 模型 | 常规请求 | 高分辨率或高画质 | 建议 |
+| --- | --- | --- | --- |
+| GPT-Image-2 | 120 到 300 秒 | 300 到 600 秒 | 4K / high 使用 600 秒兜底 |
+| Nano Banana 2 | 120 到 300 秒 | 300 到 360 秒 | 4K 或高峰期使用更长超时 |
+| Nano Banana Pro | 300 秒 | 600 秒 | 终稿和 4K 编辑建议 600 秒 |
+
+<Note>
+  反向代理、CDN、客户端 SDK 和浏览器请求都可能有独立超时。只提高应用代码超时不一定足够。
+</Note>
+
+## 内容审核与 200 无图片
+
+Gemini 图像模型可能返回 HTTP 200，但 `candidates[].content.parts[]` 中没有图片。这通常不是网络失败，而是模型安全策略或内容策略拒绝。
+
+生产解析顺序建议：
+
+<Steps>
+  <Step title="先找 URL 图片">
+    遍历 `candidates[].content.parts[]`，优先查找 `fileData.fileUri`。
+  </Step>
+  <Step title="兼容 base64 图片">
+    如果没有 URL，再检查是否存在 `inlineData.data`。这通常用于官方直返或历史兼容链路。
+  </Step>
+  <Step title="检查 finishReason">
+    如果没有图片，查看 `finishReason`、文本 part 和 `usageMetadata`。
+  </Step>
+  <Step title="给用户可操作提示">
+    将内容违规、公众人物、换脸、真实人物敏感编辑等场景转成友好提示。
+  </Step>
+  <Step title="保留完整响应给开发者">
+    日志中保留请求 ID、模型名、状态码和响应摘要，便于排查。
+  </Step>
+</Steps>

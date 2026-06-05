@@ -1,0 +1,118 @@
+---
+title: "常见问题"
+description: "图片接口接入、URL 返回、base64 兼容、超时、编辑图、内容审核和计费相关问题。"
+---
+
+## 接入与协议
+
+<AccordionGroup>
+  <Accordion title="这 3 个模型都能用 OpenAI Images 调吗？" icon="route">
+    不能。`gpt-image-2` 使用 OpenAI Images：`/v1/images/generations` 和 `/v1/images/edits`。Nano Banana 2 / Pro 使用 Gemini Native：`/v1beta/models/{model}:generateContent`。
+  </Accordion>
+  <Accordion title="Nano Banana 2 / Pro 的编辑图 endpoint 是什么？" icon="images">
+    与文生图相同，都是 `:generateContent`。编辑图通过 `contents[].parts[]` 中的图片 part 实现，没有单独 `/edits`。
+  </Accordion>
+  <Accordion title="nano-banana-2 可以直接作为 model 传吗？" icon="tag">
+    不建议。`Nano Banana 2` 是产品展示名，请求中使用 `gemini-3.1-flash-image-preview`。`Nano Banana Pro` 使用 `gemini-3-pro-image-preview`。
+  </Accordion>
+  <Accordion title="DeepToken 是什么角色？" icon="shield-check">
+    DeepToken 是面向客户的 OpenAI / Gemini 官方能力代理与中转服务，提供统一鉴权、模型路由、账号调度、计费和 URL 形式图片返回。
+  </Accordion>
+</AccordionGroup>
+
+## 风险预警
+
+<Warning>
+  图片生成属于高耗时、高资源请求。生产接入前请确认并发策略、备用渠道和模型范围，避免把单一服务当作唯一出图路径。
+</Warning>
+
+<AccordionGroup>
+  <Accordion title="QPS 超过 50 需要提前告知吗？" icon="activity">
+    需要。如果你的业务预计图片请求 QPS 会超过 50，请提前联系 DeepToken。我们会根据你的请求规模、模型、尺寸档位和峰值时段协助评估容量，避免高峰期触发限流或排队。
+  </Accordion>
+  <Accordion title="可以把 DeepToken 当作唯一图片渠道吗？" icon="triangle-alert">
+    不建议。请为核心业务准备备用渠道或降级方案。当资源紧张、容量不足或官方模型拥塞时，接口可能返回特殊错误码，例如 `529`。收到这类错误时，应退避重试，并在必要时切换到你的备用出图方案。
+  </Accordion>
+  <Accordion title="目前支持哪些图片模型？" icon="list-checks">
+    当前图片文档和接口范围仅覆盖 `GPT-Image-2`、`Nano Banana 2`、`Nano Banana Pro`。请求中分别使用 `gpt-image-2`、`gemini-3.1-flash-image-preview`、`gemini-3-pro-image-preview`。其他图片模型暂不在本文档支持范围内。
+  </Accordion>
+</AccordionGroup>
+
+## 图片返回与保存
+
+<AccordionGroup>
+  <Accordion title="为什么文档推荐 URL 返回？" icon="link">
+    URL 响应体更小、客户端更快拿到结果，也更节省中转服务器带宽。base64 会比原始二进制图片大约 33%，2K/4K 场景尤其明显。
+  </Accordion>
+  <Accordion title="OpenAI Images 返回字段读哪个？" icon="file-image">
+    新接入推荐请求 `response_format: "url"`，读取 `data[].url`。历史兼容场景可以请求 `b64_json` 并读取 `data[].b64_json`。
+  </Accordion>
+  <Accordion title="Gemini 响应里图片一定是第一个 part 吗？" icon="search">
+    不一定。应该遍历所有 `parts[]`，优先查找 `fileData.fileUri`。兼容官方直返或历史链路时，再兜底处理 `inlineData.data`。
+  </Accordion>
+  <Accordion title="还需要处理 base64 吗？" icon="binary">
+    需要保留兼容逻辑。OpenAI Images 的 `b64_json` 和 Gemini 的 `inlineData.data` 通常是纯 base64，不带 `data:image/png;base64,` 前缀。新系统建议优先走 URL。
+  </Accordion>
+</AccordionGroup>
+
+## 图片上传与编辑图
+
+<AccordionGroup>
+  <Accordion title="DeepToken 会提供图片上传服务吗？" icon="upload-cloud">
+    会。图片上传服务上线后，建议先把本地图片上传为 HTTPS URL，再在编辑图请求中传 `image_url` 或 Gemini `fileData.fileUri`，减少主请求体大小并提升响应稳定性。
+  </Accordion>
+  <Accordion title="GPT-Image-2 编辑图支持哪些图片输入？" icon="upload">
+    支持 JSON 的 `images[].image_url`、`images[].b64_json`、`images[].image`，也支持 multipart 的 `image` 或 `image[]` 文件上传。当前不支持 `file_id`。
+  </Accordion>
+  <Accordion title="Gemini Native 多图编辑怎么写？" icon="layers">
+    一个 `text` part 写编辑指令，后面每张图一个 `inlineData` 或 `fileData` part。每个 part 只放一种内容，不要在同一个 part 里同时放 `text` 和图片。
+  </Accordion>
+  <Accordion title="参考图越多越好吗？" icon="image-up">
+    不一定。参考图越多，请求体、官方处理耗时和模型理解难度越高。生产中建议只放对结果真正必要的图，并在 prompt 里明确每张图的角色。
+  </Accordion>
+</AccordionGroup>
+
+## 超时与同步
+
+<AccordionGroup>
+  <Accordion title="图片接口是同步还是异步？" icon="clock">
+    当前文档覆盖的是同步 HTTP 接口。请求发起后等待生成完成并返回图片 URL 或错误。没有公开 `task_id` + 轮询状态的异步任务接口。
+  </Accordion>
+  <Accordion title="客户端断开后会取消生成吗？" icon="plug-zap">
+    不应依赖断连取消。请求一旦进入官方生成阶段，服务端可能继续等待官方结果并记录计费。需要取消/队列能力时，应在业务层设计任务队列。
+  </Accordion>
+  <Accordion title="为什么 4K 请求很慢？" icon="timer">
+    4K 输出、高画质、复杂 prompt、多参考图都会增加官方处理时间。客户端、反向代理和网关都需要更长超时。
+  </Accordion>
+</AccordionGroup>
+
+## 计费
+
+<AccordionGroup>
+  <Accordion title="图片按什么扣费？" icon="badge-dollar-sign">
+    当前按成功生成或编辑的图片次数扣费。文生图和编辑图都按模型与尺寸档位计费，1K/2K/4K 当前价格见 [价格与计费档位](./pricing)。
+  </Accordion>
+  <Accordion title="GPT-Image-2 会按 token 向客户扣费吗？" icon="coins">
+    当前不按 token 向客户扣费。图片请求按成功图片次数和 1K/2K/4K 档位计费。
+  </Accordion>
+  <Accordion title="为什么未知尺寸按 2K？" icon="circle-help">
+    系统为了避免漏计，会在无法识别图片尺寸时默认归一到 `2K`。如果业务大量使用 `auto`，建议在产品说明中明确这个兜底规则。
+  </Accordion>
+  <Accordion title="错误请求会计费吗？" icon="receipt">
+    本地鉴权失败、参数错误、队列拒绝等通常不会产生成功图片计费。若请求已进入官方生成阶段，即使客户端断开或官方长尾返回，仍可能记录计费。
+  </Accordion>
+</AccordionGroup>
+
+## 内容安全
+
+<AccordionGroup>
+  <Accordion title="HTTP 200 但没有图片怎么办？" icon="shield-alert">
+    对 Gemini 图像模型，这常见于安全策略拦截。检查 `candidates`、`finishReason`、文本 part 和 `usageMetadata`，并给用户展示可操作的修改建议。
+  </Accordion>
+  <Accordion title="公众人物、换脸、真人换装为什么失败？" icon="user-x">
+    这些场景可能触发模型安全策略。建议改成非真实人物、弱化身份指向，或改用合规的素材生产流程。
+  </Accordion>
+  <Accordion title="应该把完整错误直接展示给终端用户吗？" icon="messages-square">
+    不建议。终端用户看到友好解释和修改建议即可；完整响应、请求 ID 和模型 ID 应保留在开发者日志中。
+  </Accordion>
+</AccordionGroup>

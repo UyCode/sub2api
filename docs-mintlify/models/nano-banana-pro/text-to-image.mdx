@@ -1,0 +1,119 @@
+---
+title: "Nano Banana Pro 文生图"
+description: "使用 Gemini Native generateContent 调用 Nano Banana Pro 文生图，并优先读取 URL 形式结果。"
+---
+
+## Endpoint
+
+```http
+POST https://YOUR_DOMAIN/v1beta/models/gemini-3-pro-image-preview:generateContent
+```
+
+## 请求示例
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST "https://YOUR_DOMAIN/v1beta/models/gemini-3-pro-image-preview:generateContent" \
+  -H "Authorization: Bearer $SUB2API_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contents": [{
+      "parts": [{
+        "text": "Design a polished 4K launch poster for an AI image API gateway. Premium typography, clean layout, accurate UI details."
+      }]
+    }],
+    "generationConfig": {
+      "responseModalities": ["IMAGE"],
+      "imageConfig": {
+        "aspectRatio": "16:9",
+        "imageSize": "4K"
+      }
+    }
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "https://YOUR_DOMAIN/v1beta/models/gemini-3-pro-image-preview:generateContent",
+    headers={
+        "Authorization": "Bearer SUB2API_API_KEY",
+        "Content-Type": "application/json",
+    },
+    json={
+        "contents": [{
+            "parts": [{
+                "text": "Design a polished 4K launch poster for an AI image API gateway."
+            }]
+        }],
+        "generationConfig": {
+            "responseModalities": ["IMAGE"],
+            "imageConfig": {"aspectRatio": "16:9", "imageSize": "4K"},
+        },
+    },
+    timeout=600,
+)
+response.raise_for_status()
+data = response.json()
+
+image_url = None
+for part in data["candidates"][0]["content"]["parts"]:
+    file_data = part.get("fileData")
+    if file_data and file_data.get("fileUri"):
+        image_url = file_data["fileUri"]
+        break
+
+print(image_url)
+```
+
+</CodeGroup>
+
+## 参数
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `contents[].parts[].text` | string | 是 | - | 文本提示词。Pro 场景建议写清文字内容、版式、材质、品牌规则和用途。 |
+| `generationConfig.responseModalities` | array | 是 | - | 通常为 `["IMAGE"]`。需要文字说明时可用 `["TEXT","IMAGE"]`。 |
+| `generationConfig.imageConfig.aspectRatio` | string | 否 | `1:1` | 输出宽高比，如 `16:9`、`9:16`、`1:1`、`4:3`、`3:4`、`5:4`。 |
+| `generationConfig.imageConfig.imageSize` | string | 否 | `1K` | `1K`、`2K`、`4K`。 |
+| `generationConfig.candidateCount` | integer | 否 | `1` | 候选结果数量。生产建议按单图处理。 |
+| `systemInstruction` | object | 否 | - | 系统级指令，可用于品牌风格、禁用元素和一致性要求。 |
+| `safetySettings` | array | 否 | 官方默认 | 内容安全策略。 |
+
+<Warning>
+  Pro 更适合终稿和高质量素材。4K 输出耗时更长，生产客户端请使用 600 秒级别超时兜底。
+</Warning>
+
+## 响应处理
+
+返回结构与 Nano Banana 2 一致。遍历 `candidates[].content.parts[]`，优先查找 `fileData.fileUri`。
+
+```json
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "fileData": {
+              "mimeType": "image/png",
+              "fileUri": "https://YOUR_DOMAIN/assets/images/req_abc123/nano-banana-pro-0.png"
+            }
+          }
+        ]
+      },
+      "finishReason": "STOP"
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 18,
+    "candidatesTokenCount": 420
+  }
+}
+```
+
+<Note>
+  兼容官方直返或历史链路时，响应也可能包含 `inlineData.data`。生产新接入建议优先使用 URL，以降低响应体大小和中转带宽占用。
+</Note>

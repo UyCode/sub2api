@@ -1,0 +1,166 @@
+---
+title: "Nano Banana Pro 图片编辑"
+description: "使用 Nano Banana Pro 进行高质量参考图编辑和多图融合，并优先读取 URL 结果。"
+---
+
+## Endpoint
+
+```http
+POST https://YOUR_DOMAIN/v1beta/models/gemini-3-pro-image-preview:generateContent
+```
+
+Nano Banana Pro 编辑图使用 Gemini Native `contents[].parts[]`。第一个 part 放编辑指令，后续 part 放参考图片。当前可用 `inlineData` 传 base64 图片；图片上传服务上线后，推荐使用上传后的 HTTPS URL 或 `fileData.fileUri`，减少主请求体大小。
+
+## 单图编辑
+
+<CodeGroup>
+
+```bash cURL
+IMAGE_BASE64="$(base64 -i product.png | tr -d '\n')"
+
+curl -X POST "https://YOUR_DOMAIN/v1beta/models/gemini-3-pro-image-preview:generateContent" \
+  -H "Authorization: Bearer $SUB2API_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contents": [{
+      "parts": [
+        {
+          "text": "Turn this product image into a premium poster. Keep the object shape and logo intact. Add elegant typography space on the right."
+        },
+        {
+          "inlineData": {
+            "mimeType": "image/png",
+            "data": "'"$IMAGE_BASE64"'"
+          }
+        }
+      ]
+    }],
+    "generationConfig": {
+      "responseModalities": ["TEXT", "IMAGE"],
+      "imageConfig": {
+        "aspectRatio": "16:9",
+        "imageSize": "4K"
+      }
+    }
+  }'
+```
+
+```python Python
+import base64
+import requests
+
+with open("product.png", "rb") as f:
+    product = base64.b64encode(f.read()).decode("utf-8")
+
+response = requests.post(
+    "https://YOUR_DOMAIN/v1beta/models/gemini-3-pro-image-preview:generateContent",
+    headers={
+        "Authorization": "Bearer SUB2API_API_KEY",
+        "Content-Type": "application/json",
+    },
+    json={
+        "contents": [{
+            "parts": [
+                {
+                    "text": "Turn this product image into a premium poster. Keep the object shape and logo intact."
+                },
+                {"inlineData": {"mimeType": "image/png", "data": product}},
+            ]
+        }],
+        "generationConfig": {
+            "responseModalities": ["TEXT", "IMAGE"],
+            "imageConfig": {"aspectRatio": "16:9", "imageSize": "4K"},
+        },
+    },
+    timeout=600,
+)
+response.raise_for_status()
+data = response.json()
+
+image_url = None
+for part in data["candidates"][0]["content"]["parts"]:
+    file_data = part.get("fileData")
+    if file_data and file_data.get("fileUri"):
+        image_url = file_data["fileUri"]
+        break
+
+print(image_url)
+```
+
+</CodeGroup>
+
+## 多图融合
+
+```json
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Use image 1 as the product, image 2 as the background mood, and image 3 as the typography reference. Preserve brand colors."
+        },
+        {
+          "inlineData": {
+            "mimeType": "image/png",
+            "data": "<BASE64_PRODUCT>"
+          }
+        },
+        {
+          "inlineData": {
+            "mimeType": "image/jpeg",
+            "data": "<BASE64_BACKGROUND>"
+          }
+        },
+        {
+          "inlineData": {
+            "mimeType": "image/png",
+            "data": "<BASE64_LAYOUT_REFERENCE>"
+          }
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "responseModalities": ["TEXT", "IMAGE"],
+    "imageConfig": {
+      "aspectRatio": "16:9",
+      "imageSize": "4K"
+    }
+  }
+}
+```
+
+## 参数规则
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `contents[].parts[].text` | string | 是 | 编辑指令。建议明确保留项、修改项、文字内容和品牌要求。 |
+| `contents[].parts[].inlineData.mimeType` | string | 图片 base64 输入必填 | `image/png`、`image/jpeg` 或官方支持的图片 MIME。 |
+| `contents[].parts[].inlineData.data` | string | 图片 base64 输入必填 | 图片纯 base64，不带 data URL 前缀。 |
+| `contents[].parts[].fileData.fileUri` | string | URL 输入时必填 | 图片上传服务或可信对象存储返回的 HTTPS URL。 |
+| `generationConfig.responseModalities` | array | 是 | `["IMAGE"]` 或 `["TEXT","IMAGE"]`。 |
+| `generationConfig.imageConfig.aspectRatio` | string | 否 | 输出宽高比。 |
+| `generationConfig.imageConfig.imageSize` | string | 否 | `1K`、`2K`、`4K`。 |
+| `systemInstruction` | object | 否 | 品牌规则、风格边界或安全边界。 |
+| `safetySettings` | array | 否 | 内容安全策略。 |
+
+## 编辑质量建议
+
+<AccordionGroup>
+  <Accordion title="明确保留项" icon="shield-check">
+    Pro 适合高质量编辑，但仍需要清晰说明“必须保留”的元素，例如人物身份、产品结构、Logo、文字内容或品牌色。
+  </Accordion>
+  <Accordion title="把每张图的角色写清楚" icon="layers">
+    多图融合时使用“image 1 / image 2 / image 3”指代图片角色，避免模型混淆主体、背景和风格参考。
+  </Accordion>
+  <Accordion title="优先复用输出 URL" icon="link">
+    多轮精修时可以直接把上一次输出 URL 作为下一次输入。相比下载后转 base64，URL 链路更快，也更节省中转带宽。
+  </Accordion>
+  <Accordion title="为 4K 留出更长超时" icon="timer">
+    高分辨率编辑的耗时和响应体都更大。客户端、网关和反向代理都应避免过短超时。
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  如果返回 HTTP 200 但没有图片 part，通常表示模型生成被安全策略或内容策略拦截。不要只判断 HTTP 状态码；还需要检查 `candidates`、`finishReason` 和 `parts[]`。
+</Warning>

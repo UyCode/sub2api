@@ -1,0 +1,128 @@
+---
+title: "GPT-Image-2 图片编辑"
+description: "使用 GPT-Image-2 编辑参考图、融合多图或进行局部修改，并以 URL 形式读取结果。"
+---
+
+## Endpoint
+
+```http
+POST https://YOUR_DOMAIN/v1/images/edits
+```
+
+编辑图支持两种输入方式：JSON 中传图片 URL/base64，或 multipart 上传文件。生产环境如果图片较大，推荐先上传到可信对象存储或 DeepToken 后续图片上传服务，再传 `image_url`，避免请求体过大。
+
+## JSON 请求
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST "https://YOUR_DOMAIN/v1/images/edits" \
+  -H "Authorization: Bearer $SUB2API_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image-2",
+    "prompt": "Replace the background with a clean aurora-lit studio, preserve the product geometry.",
+    "images": [
+      {
+        "image_url": "https://example.com/input-keyboard.png"
+      }
+    ],
+    "size": "2048x1152",
+    "quality": "medium",
+    "response_format": "url"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "https://YOUR_DOMAIN/v1/images/edits",
+    headers={
+        "Authorization": "Bearer SUB2API_API_KEY",
+        "Content-Type": "application/json",
+    },
+    json={
+        "model": "gpt-image-2",
+        "prompt": "Change the background to a clean aurora-lit studio.",
+        "images": [{"image_url": "https://example.com/input-keyboard.png"}],
+        "size": "2048x1152",
+        "quality": "medium",
+        "response_format": "url",
+    },
+    timeout=600,
+)
+response.raise_for_status()
+
+image_url = response.json()["data"][0]["url"]
+print(image_url)
+```
+
+</CodeGroup>
+
+## Multipart 请求
+
+```bash
+curl -X POST "https://YOUR_DOMAIN/v1/images/edits" \
+  -H "Authorization: Bearer $SUB2API_API_KEY" \
+  -F "model=gpt-image-2" \
+  -F "prompt=Keep the subject, replace the background with a premium studio scene." \
+  -F "image=@input.png" \
+  -F "size=1024x1024" \
+  -F "quality=low" \
+  -F "response_format=url"
+```
+
+## 参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `model` | string | 否 | 默认 `gpt-image-2`。 |
+| `prompt` | string | 是 | 编辑指令。建议说明哪些元素必须保留、哪些要改变。 |
+| `images[]` | array | JSON 模式必填 | 支持 `image_url`、`b64_json` 或 `image`。不支持 `file_id`。 |
+| `image` / `image[]` | file | multipart 模式必填 | 参考图文件。多图可重复传 `image[]`。 |
+| `mask` | object/file | 否 | 局部编辑遮罩。JSON 可传 `mask.image_url` 或 base64；multipart 可上传 `mask` 文件。 |
+| `size` | string | 否 | 输出尺寸，用于 1K/2K/4K 档位归一。 |
+| `quality` | string | 否 | 画质档位。 |
+| `response_format` | string | 否 | 推荐 `url`；兼容 `b64_json`。 |
+| `output_format` | string | 否 | `png`、`jpeg`、`webp`。 |
+| `output_compression` | integer | 否 | JPEG/WebP 压缩质量，具体支持取决于官方能力。 |
+| `background` | string | 否 | 背景策略，常用于透明背景或自动背景。 |
+| `input_fidelity` | string | 否 | 控制参考图保真程度，适合需要保留人物、产品结构或品牌元素的编辑。 |
+| `moderation` | string | 否 | 内容审核策略。 |
+| `stream` | boolean | 否 | 是否启用图片生成流式事件。 |
+| `partial_images` | integer | 否 | 流式模式下可返回的中间图片数量。 |
+| `user` | string | 否 | 终端用户标识，便于审计和问题定位。 |
+
+<Warning>
+  `images[].file_id` 和 `mask.file_id` 当前不支持。请使用 `image_url`、base64 或 multipart 文件上传。
+</Warning>
+
+## 响应
+
+```json
+{
+  "created": 1780545600,
+  "data": [
+    {
+      "url": "https://YOUR_DOMAIN/assets/images/req_abc123/edited-0.png"
+    }
+  ]
+}
+```
+
+URL 返回能避免编辑图结果以 base64 形式塞进响应体。对 2K / 4K 输出，这通常能明显降低客户端等待时间和中转带宽占用。
+
+## 多图编辑建议
+
+<AccordionGroup>
+  <Accordion title="在 prompt 中标注图片顺序" icon="list-ordered">
+    使用「第一张图」「第二张图」描述多图关系，例如“保留第一张图的人物，把第二张图的灯光和背景应用到产品上”。
+  </Accordion>
+  <Accordion title="控制参考图大小" icon="file-image">
+    参考图越大，请求体、上传时间和官方处理耗时越高。生产环境建议压缩到业务可接受的尺寸，并使用 HTTPS URL。
+  </Accordion>
+  <Accordion title="局部编辑使用 mask" icon="scan">
+    需要只改某个区域时传 mask。mask 的透明区域和非透明区域语义取决于官方实现，正式上线前应做小样验证。
+  </Accordion>
+</AccordionGroup>

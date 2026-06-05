@@ -1,0 +1,169 @@
+---
+title: "Nano Banana 2 图片编辑"
+description: "使用 Gemini Native 图片 part 调用 Nano Banana 2 进行编辑，并优先读取 URL 结果。"
+---
+
+## Endpoint
+
+```http
+POST https://YOUR_DOMAIN/v1beta/models/gemini-3.1-flash-image-preview:generateContent
+```
+
+编辑图仍然调用 `generateContent`。请求中使用一个文本 part 描述编辑指令，后面追加一个或多个图片 part。当前可用 `inlineData` 传 base64 图片；图片上传服务上线后，推荐使用上传后的 HTTPS URL 或 `fileData.fileUri`，减少主请求体大小。
+
+## 单图编辑
+
+<CodeGroup>
+
+```bash cURL
+IMAGE_BASE64="$(base64 -i input.png | tr -d '\n')"
+
+curl -X POST "https://YOUR_DOMAIN/v1beta/models/gemini-3.1-flash-image-preview:generateContent" \
+  -H "Authorization: Bearer $SUB2API_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contents": [{
+      "parts": [
+        {
+          "text": "Keep the product unchanged, replace the background with a clean futuristic studio."
+        },
+        {
+          "inlineData": {
+            "mimeType": "image/png",
+            "data": "'"$IMAGE_BASE64"'"
+          }
+        }
+      ]
+    }],
+    "generationConfig": {
+      "responseModalities": ["IMAGE"],
+      "imageConfig": {
+        "aspectRatio": "16:9",
+        "imageSize": "2K"
+      }
+    }
+  }'
+```
+
+```python Python
+import base64
+import requests
+
+with open("input.png", "rb") as f:
+    image_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+response = requests.post(
+    "https://YOUR_DOMAIN/v1beta/models/gemini-3.1-flash-image-preview:generateContent",
+    headers={
+        "Authorization": "Bearer SUB2API_API_KEY",
+        "Content-Type": "application/json",
+    },
+    json={
+        "contents": [{
+            "parts": [
+                {"text": "Keep the product unchanged, replace the background with a futuristic studio."},
+                {"inlineData": {"mimeType": "image/png", "data": image_b64}},
+            ]
+        }],
+        "generationConfig": {
+            "responseModalities": ["IMAGE"],
+            "imageConfig": {"aspectRatio": "16:9", "imageSize": "2K"},
+        },
+    },
+    timeout=360,
+)
+response.raise_for_status()
+data = response.json()
+
+image_url = None
+for part in data["candidates"][0]["content"]["parts"]:
+    file_data = part.get("fileData")
+    if file_data and file_data.get("fileUri"):
+        image_url = file_data["fileUri"]
+        break
+
+print(image_url)
+```
+
+</CodeGroup>
+
+## 多图编辑
+
+```json
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Use image 1 as the product subject and image 2 as the lighting reference. Keep the logo readable."
+        },
+        {
+          "inlineData": {
+            "mimeType": "image/png",
+            "data": "<BASE64_IMAGE_1>"
+          }
+        },
+        {
+          "inlineData": {
+            "mimeType": "image/jpeg",
+            "data": "<BASE64_IMAGE_2>"
+          }
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "responseModalities": ["TEXT", "IMAGE"],
+    "imageConfig": {
+      "aspectRatio": "5:4",
+      "imageSize": "2K"
+    }
+  }
+}
+```
+
+## 参数规则
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `contents[].parts[].text` | string | 是 | 编辑指令。建议只放在第一个 part。 |
+| `contents[].parts[].inlineData.mimeType` | string | 图片 base64 输入必填 | `image/png`、`image/jpeg` 或官方支持的图片 MIME。 |
+| `contents[].parts[].inlineData.data` | string | 图片 base64 输入必填 | 图片纯 base64，不带 data URL 前缀。 |
+| `contents[].parts[].fileData.fileUri` | string | URL 输入时必填 | 图片上传服务或可信对象存储返回的 HTTPS URL。 |
+| `contents[].parts[].fileData.mimeType` | string | URL 输入时建议 | 图片 MIME，帮助官方模型识别文件类型。 |
+| `generationConfig.responseModalities` | array | 是 | `["IMAGE"]` 或 `["TEXT","IMAGE"]`。 |
+| `generationConfig.imageConfig.aspectRatio` | string | 否 | 输出宽高比。 |
+| `generationConfig.imageConfig.imageSize` | string | 否 | `512`、`1K`、`2K`、`4K`。 |
+| `safetySettings` | array | 否 | 内容安全策略。 |
+
+<Warning>
+  每个 part 只能包含一种内容：要么是 `text`，要么是 `inlineData`，要么是 `fileData`。不要在同一个 part 里同时放文字和图片。
+</Warning>
+
+## 输出读取
+
+DeepToken 优先返回 URL：
+
+```json
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "fileData": {
+              "mimeType": "image/png",
+              "fileUri": "https://YOUR_DOMAIN/assets/images/req_abc123/edited-0.png"
+            }
+          }
+        ]
+      },
+      "finishReason": "STOP"
+    }
+  ]
+}
+```
+
+<Tip>
+  多轮编辑时，可以把上一次输出 URL 作为下一次请求的图片输入，再追加新的文本指令逐步精修。这样比反复下载再转 base64 更快，也更节省带宽。
+</Tip>
